@@ -1,4 +1,62 @@
-<script>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Tachéo AR — lock sans couper la caméra</title>
+
+  <!-- A-Frame puis MindAR (versions stables) -->
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <script src="https://unpkg.com/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+
+  <style>
+    body{ margin:0; overflow:hidden; background:#000; font-family:system-ui,Arial,sans-serif; }
+    #status{
+      position:fixed; top:10px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,.55); color:#fff; padding:6px 10px; border-radius:8px; font-size:13px; z-index:10;
+    }
+    .ui{ position:fixed; left:0; right:0; bottom:14px; display:flex; gap:10px; justify-content:center; z-index:10; }
+    .ui button{ padding:10px 14px; border:none; border-radius:10px; font-size:15px; color:#fff; }
+    #lockBtn{ background:#16a34a } #unlockBtn{ background:#334155 }
+
+    /* Option: toujours masquer l’overlay de scan MindAR */
+    .mindar-ui-scanning{ display:none !important; }
+
+    /* …ou seulement après verrouillage :
+    body.locked .mindar-ui-scanning{ display:none !important; }
+    */
+  </style>
+</head>
+<body>
+  <div id="status">Scan de la cible…</div>
+
+  <a-scene
+    mindar-image="imageTargetSrc: ./target.mind; autoStart: true; uiScanning: true;"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: true">
+
+    <a-assets timeout="45000">
+      <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
+    </a-assets>
+
+    <a-camera look-controls="enabled: true"></a-camera>
+
+    <a-entity id="markerRoot" mindar-image-target="targetIndex: 0">
+      <a-entity id="tacheo"
+        gltf-model="#tacheoModel"
+        position="0 0 -0.5"
+        rotation="0 0 0"
+        scale="0.3 0.3 0.3">
+      </a-entity>
+    </a-entity>
+  </a-scene>
+
+  <div class="ui">
+    <button id="lockBtn" disabled>Verrouiller</button>
+    <button id="unlockBtn" disabled>Déverrouiller</button>
+  </div>
+
+  <script>
   const sceneEl    = document.querySelector('a-scene');
   const marker     = document.getElementById('markerRoot');
   const tacheo     = document.getElementById('tacheo');
@@ -105,3 +163,5 @@
     }
   });
 </script>
+</body>
+</html>
