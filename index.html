@@ -1,29 +1,168 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mon projet AR</title>
-  <link rel="stylesheet" href="style.css">
-  <!-- Librairies AR.js et A-Frame -->
+  <title>Tachéo AR</title>
+
+  <!-- A-Frame + MindAR -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.1.5/dist/mindar-image-aframe.prod.js"></script>
+
+  <style>
+    body { margin:0; overflow:hidden; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+    .ui {
+      position: fixed; left: 0; right: 0; bottom: 0;
+      display: flex; gap: 12px; justify-content: center; align-items: center;
+      padding: 10px; pointer-events: none;
+    }
+    .ui > * { pointer-events: auto; }
+    #startBtn, #lockBtn, #recalBtn {
+      padding: 10px 16px; border: none; border-radius: 10px; font-size: 15px;
+    }
+    #startBtn { background:#2563eb; color:#fff; }
+    #lockBtn { background:#16a34a; color:#fff; }
+    #recalBtn { background:#334155; color:#fff; }
+    #status {
+      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,.6); color:#fff; padding: 6px 10px; border-radius: 8px; font-size: 14px;
+    }
+    /* Astuce: masque le canvas noir avant démarrage */
+    .aframe-container:not(.started) canvas { display:none; }
+  </style>
 </head>
 <body>
-  <a-scene embedded arjs>
-    <!-- Marqueur "hiro" par défaut -->
-    <a-marker preset="hiro">
-      <!-- Le modèle 3D -->
-      <a-entity 
-        gltf-model="url(modele.glb)"
-        scale="0.5 0.5 0.5" 
-        position="0 0 0"
-        rotation="0 0 0">
-        </a-entity>
-    </a-marker>
-    <!-- Caméra -->
-    <a-entity camera></a-entity>
+
+  <!-- Statut en haut -->
+  <div id="status">Prêt — clique “Démarrer l’AR”</div>
+
+  <!-- Scène AR (autoStart désactivé: on démarre après click) -->
+  <a-scene
+    class="aframe-container"
+    mindar-image="imageTargetSrc: ./target.mind; autoStart: false;"
+    embedded
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: true">
+
+    <!-- Préchargement (optionnel) -->
+    <a-assets timeout="30000">
+      <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
+    </a-assets>
+
+    <a-camera position="0 0 0" look-controls="enabled: true"></a-camera>
+
+    <!-- CIBLE : index 0 du target.mind -->
+    <a-entity id="markerRoot" mindar-image-target="targetIndex: 0">
+      <!-- OBJET avec OFFSET (ex: 50cm devant la cible) -->
+      <a-entity id="tacheo"
+                gltf-model="#tacheoModel"
+                position="0 0 -0.5"
+                rotation="0 0 0"
+                scale="0.3 0.3 0.3">
+      </a-entity>
+    </a-entity>
   </a-scene>
-  <script src="script.js"></script>
+
+  <!-- UI bas -->
+  <div class="ui">
+    <button id="startBtn">Démarrer l’AR (caméra)</button>
+    <button id="lockBtn" disabled>Verrouiller sur la table</button>
+    <button id="recalBtn" disabled>Recalibrer (viser la cible)</button>
+  </div>
+
+  <script>
+    const sceneEl   = document.querySelector('a-scene');
+    const statusEl  = document.getElementById('status');
+    const startBtn  = document.getElementById('startBtn');
+    const lockBtn   = document.getElementById('lockBtn');
+    const recalBtn  = document.getElementById('recalBtn');
+
+    const markerRoot = document.getElementById('markerRoot');
+    const tacheo     = document.getElementById('tacheo');
+
+    let hasFoundOnce = false;   // cible vue au moins une fois
+    let locked       = false;   // objet verrouillé (détaché de la cible)
+
+    // Démarrage manuel (utile pour Android/iOS afin d'obtenir les permissions)
+    startBtn.addEventListener('click', async () => {
+      try {
+        statusEl.textContent = 'Demande d’accès caméra...';
+        const system = sceneEl.systems['mindar-image-system'];
+        await system.start(); // démarre la caméra + détection
+        document.querySelector('.aframe-container').classList.add('started');
+        statusEl.textContent = 'Scan de la cible...';
+        startBtn.disabled = true;
+        recalBtn.disabled = false; // on peut recalibrer plus tard
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = 'Erreur caméra (HTTPS, permissions, ou fichier target.mind introuvable).';
+      }
+    });
+
+    // Événements MindAR : trouvé / perdu
+    markerRoot.addEventListener('targetFound', () => {
+      hasFoundOnce = true;
+      statusEl.textContent = locked
+        ? 'Cible vue (objet déjà verrouillé).'
+        : 'Cible détectée ✅ — tu peux “Verrouiller sur la table”.';
+      if (!locked) lockBtn.disabled = false;
+    });
+
+    markerRoot.addEventListener('targetLost', () => {
+      statusEl.textContent = locked
+        ? 'Cible perdue, mais objet verrouillé dans la scène.'
+        : 'Cible perdue — vise la cible pour calibrer.';
+      if (!locked) lockBtn.disabled = true;
+    });
+
+    // Verrouiller : détacher de la cible et garder la pose actuelle
+    lockBtn.addEventListener('click', () => {
+      if (!hasFoundOnce) {
+        statusEl.textContent = 'Vise la cible au moins une fois avant de verrouiller.';
+        return;
+      }
+      if (locked) return;
+
+      // Pose actuelle en monde
+      const worldPos = new THREE.Vector3();
+      const worldQuat = new THREE.Quaternion();
+      const worldScale = new THREE.Vector3();
+      tacheo.object3D.getWorldPosition(worldPos);
+      tacheo.object3D.getWorldQuaternion(worldQuat);
+      tacheo.object3D.getWorldScale(worldScale);
+
+      // Détacher de markerRoot → attacher à la scène
+      sceneEl.object3D.attach(tacheo.object3D);
+
+      // Appliquer la pose (A-Frame veut position/rotation en degrés)
+      tacheo.setAttribute('position', `${worldPos.x} ${worldPos.y} ${worldPos.z}`);
+      const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
+      tacheo.setAttribute('rotation', `${THREE.Math.radToDeg(euler.x)} ${THREE.Math.radToDeg(euler.y)} ${THREE.Math.radToDeg(euler.z)}`);
+      tacheo.setAttribute('scale', `${worldScale.x} ${worldScale.y} ${worldScale.z}`);
+
+      locked = true;
+      lockBtn.disabled = true;
+      statusEl.textContent = 'Objet verrouillé ✔ — il reste en place même si la cible sort du champ.';
+    });
+
+    // Recalibrer : on ré-attache à la cible (pour réaligner), puis l’utilisateur peut re-verrouiller
+    recalBtn.addEventListener('click', () => {
+      // Si l’objet a été détaché, on le remet sous la cible
+      if (locked) {
+        markerRoot.object3D.attach(tacheo.object3D);
+        // Rétablir l’offset initial
+        tacheo.setAttribute('position', '0 0 -0.5');
+        tacheo.setAttribute('rotation', '0 0 0');
+        // Optionnel: rescales si besoin
+        // tacheo.setAttribute('scale', '0.3 0.3 0.3');
+
+        locked = false;
+        lockBtn.disabled = !hasFoundOnce;
+        statusEl.textContent = 'Recalibrage: vise la cible, puis “Verrouiller sur la table”.';
+      } else {
+        statusEl.textContent = 'Vise la cible pour calibrer, puis verrouille.';
+      }
+    });
+  </script>
 </body>
 </html>
