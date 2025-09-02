@@ -1,70 +1,29 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tachéo AR — Lock auto</title>
+  <title>Mon projet AR</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Librairies AR.js et A-Frame -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.1.5/dist/mindar-image-aframe.prod.js"></script>
-  <style>body{margin:0;overflow:hidden}</style>
+  <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
 </head>
 <body>
-  <a-scene
-    mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
-    embedded
-    vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: true">
-
-    <a-assets timeout="30000">
-      <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
-    </a-assets>
-
-    <a-camera position="0 0 0" look-controls="enabled: true"></a-camera>
-
-    <a-entity id="markerRoot" mindar-image-target="targetIndex: 0">
-      <a-entity id="tacheo"
-                gltf-model="#tacheoModel"
-                position="0 0 -0.5"
-                rotation="0 0 0"
-                scale="0.3 0.3 0.3">
-      </a-entity>
-    </a-entity>
+  <a-scene embedded arjs>
+    <!-- Marqueur "hiro" par défaut -->
+    <a-marker preset="hiro">
+      <!-- Le modèle 3D -->
+      <a-entity 
+        gltf-model="url(modele.glb)"
+        scale="0.5 0.5 0.5" 
+        position="0 0 0"
+        rotation="0 0 0">
+        </a-entity>
+    </a-marker>
+    <!-- Caméra -->
+    <a-entity camera></a-entity>
   </a-scene>
-
-  <script>
-    const sceneEl   = document.querySelector('a-scene');
-    const marker    = document.getElementById('markerRoot');
-    const tacheo    = document.getElementById('tacheo');
-
-    let locked = false;
-
-    marker.addEventListener('targetFound', () => {
-      if (locked) return;
-
-      // Attends un tout petit peu que la pose se stabilise
-      setTimeout(() => {
-        if (locked) return;
-
-        // Récupère la pose monde
-        const worldPos  = new THREE.Vector3();
-        const worldQuat = new THREE.Quaternion();
-        const worldScl  = new THREE.Vector3();
-        tacheo.object3D.getWorldPosition(worldPos);
-        tacheo.object3D.getWorldQuaternion(worldQuat);
-        tacheo.object3D.getWorldScale(worldScl);
-
-        // Détache de la cible et attache à la scène
-        sceneEl.object3D.attach(tacheo.object3D);
-
-        // Applique la pose
-        tacheo.setAttribute('position', `${worldPos.x} ${worldPos.y} ${worldPos.z}`);
-        const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
-        tacheo.setAttribute('rotation', `${THREE.Math.radToDeg(euler.x)} ${THREE.Math.radToDeg(euler.y)} ${THREE.Math.radToDeg(euler.z)}`);
-        tacheo.setAttribute('scale', `${worldScl.x} ${worldScl.y} ${worldScl.z}`);
-
-        locked = true;
-      }, 300); // 300 ms
-    });
-  </script>
+  <script src="script.js"></script>
 </body>
 </html>
