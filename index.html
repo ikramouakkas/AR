@@ -61,36 +61,42 @@
   const lockBtn   = document.getElementById('lockBtn');
   const unlockBtn = document.getElementById('unlockBtn');
 
-  // ✅ toujours prendre THREE via AFRAME
   let THREEjs = null;
-
   let locked = false, foundOnce = false;
-  const setStatus = (m)=> statusEl.textContent = m;
+
+  const setStatus = (m)=> statusEl && (statusEl.textContent = m);
 
   sceneEl.addEventListener('loaded', () => {
     THREEjs = AFRAME.THREE;
     console.log('AFRAME', AFRAME.version, 'MindAR?', !!sceneEl.systems['mindar-image-system']);
   });
 
-  // MindAR events
   marker.addEventListener('targetFound', () => {
     foundOnce = true;
-    setStatus(locked ? 'Cible trouvée (objet verrouillé).' : 'Cible trouvée — tu peux verrouiller.');
-    lockBtn.disabled   = locked;
-    unlockBtn.disabled = !locked;
+    if (!locked) {
+      setStatus('Cible détectée — tu peux verrouiller.');
+      lockBtn.disabled   = false;
+      unlockBtn.disabled = true;
+    } else {
+      setStatus('Cible détectée (objet déjà verrouillé).');
+    }
   });
 
   marker.addEventListener('targetLost', () => {
-    setStatus(locked ? 'Cible perdue (objet reste affiché).' : 'Cible perdue — vise la cible.');
-    lockBtn.disabled   = true;
-    unlockBtn.disabled = !locked;
+    if (!locked) {
+      setStatus('Cible perdue — vise la cible.');
+      lockBtn.disabled   = true;
+      unlockBtn.disabled = false;
+    } else {
+      setStatus('Cible perdue — objet figé.');
+    }
   });
 
-  // 🔒 Verrouiller = sortir l'entité du marker, en gardant sa POSE MONDE
+  // 🔒 Verrouiller = fige l’objet à la dernière pose monde et arrête MindAR
   lockBtn.addEventListener('click', () => {
     if (!foundOnce || locked) return;
+
     try {
-      // 1) lire la pose monde AVANT re-parenting
       const pos  = new THREEjs.Vector3();
       const quat = new THREEjs.Quaternion();
       const scl  = new THREEjs.Vector3();
@@ -98,42 +104,51 @@
       tacheo.object3D.getWorldQuaternion(quat);
       tacheo.object3D.getWorldScale(scl);
 
-      // 2) re-parenter AU NIVEAU DOM (plus fiable que object3D.attach)
-      //    - retire du marker, ajoute sous la scène
+      // Re-parent DOM : marker -> scene
       marker.removeChild(tacheo);
       sceneEl.appendChild(tacheo);
 
-      // 3) réappliquer la pose monde
+      // Applique POSE MONDE et fige les matrices
       tacheo.object3D.position.copy(pos);
       tacheo.object3D.quaternion.copy(quat);
       tacheo.object3D.scale.copy(scl);
+      tacheo.object3D.updateMatrix();
       tacheo.object3D.updateMatrixWorld(true);
+      tacheo.object3D.matrixAutoUpdate = false; // on fige
 
-      // 4) assurer que l’objet reste visible même si MindAR masque le marker
       tacheo.setAttribute('visible', true);
+
+      // Stoppe MindAR pour ne plus demander de rescanner
+      const sys = sceneEl.systems['mindar-image-system'];
+      if (sys && sys.stop) sys.stop();
 
       locked = true;
       lockBtn.disabled   = true;
       unlockBtn.disabled = false;
-      setStatus('Objet verrouillé ✔');
+      setStatus('Objet verrouillé ✔ (figé à l’écran)');
     } catch (e) {
       console.error('Lock error:', e);
       setStatus('Erreur lors du verrouillage (voir console).');
     }
   });
 
-  // 🔓 Déverrouiller = remettre l'entité sous le marker, avec l’offset initial
-  unlockBtn.addEventListener('click', () => {
+  // 🔓 Déverrouiller = reprend MindAR et remet l’objet sous le marker
+  unlockBtn.addEventListener('click', async () => {
     if (!locked) return;
+
     try {
-      // 1) sortir de la scène et remettre sous le marker
+      // Remettre sous le marker, rétablir l’offset initial
       sceneEl.removeChild(tacheo);
       marker.appendChild(tacheo);
 
-      // 2) reposer l'offset initial (ajuste à ta convenance)
+      tacheo.object3D.matrixAutoUpdate = true;
       tacheo.setAttribute('position', '0 0 -0.5');
       tacheo.setAttribute('rotation', '0 0 0');
-      // tacheo.setAttribute('scale', '0.3 0.3 0.3'); // si tu veux forcer l’échelle initiale
+      // tacheo.setAttribute('scale', '0.3 0.3 0.3'); // si besoin
+
+      // Relancer MindAR
+      const sys = sceneEl.systems['mindar-image-system'];
+      if (sys && sys.start) await sys.start();
 
       locked = false;
       lockBtn.disabled   = !foundOnce;
@@ -147,4 +162,5 @@
 </script>
 </body>
 </html>
+
 
