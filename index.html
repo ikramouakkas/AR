@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mon projet AR</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Librairies AR.js et A-Frame -->
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
+</head>
+<body>
+  <a-scene embedded arjs>
+    <!-- Marqueur "hiro" par défaut -->
+    <a-marker preset="hiro">
+      <!-- Le modèle 3D -->
+      <a-entity 
+        gltf-model="https://drive.google.com/uc?export=download&id=1AWIJXRpGivfBU1yuk1pTx__QwLEQBnPi" 
+        scale="0.5 0.5 0.5" 
+        position="0 0 0"
+        rotation="0 0 0">
+        </a-entity>
+    </a-marker>
+    <!-- Caméra -->
+    <a-entity camera></a-entity>
+  </a-scene>
+  <script src="script.js"></script>
+</body>
+</html>
