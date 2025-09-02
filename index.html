@@ -3,14 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Tachéo AR — clean + lock</title>
+  <title>Tachéo AR — lock sans couper la caméra</title>
 
-  <!-- Versions stables, ordre crucial -->
+  <!-- A-Frame puis MindAR (versions stables) -->
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
   <script src="https://unpkg.com/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
-    /* on ne touche PAS à video/canvas, juste un peu d’UI */
     body{ margin:0; overflow:hidden; background:#000; font-family:system-ui,Arial,sans-serif; }
     #status{
       position:fixed; top:10px; left:50%; transform:translateX(-50%);
@@ -19,32 +18,35 @@
     .ui{ position:fixed; left:0; right:0; bottom:14px; display:flex; gap:10px; justify-content:center; z-index:10; }
     .ui button{ padding:10px 14px; border:none; border-radius:10px; font-size:15px; color:#fff; }
     #lockBtn{ background:#16a34a } #unlockBtn{ background:#334155 }
+
+    /* Option: toujours masquer l’overlay de scan MindAR */
+    .mindar-ui-scanning{ display:none !important; }
+
+    /* …ou seulement après verrouillage :
+    body.locked .mindar-ui-scanning{ display:none !important; }
+    */
   </style>
 </head>
 <body>
   <div id="status">Scan de la cible…</div>
 
   <a-scene
-    mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
+    mindar-image="imageTargetSrc: ./target.mind; autoStart: true; uiScanning: true;"
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: true">
-    <!-- pas de renderer/background custom ici -->
 
-    <!-- Précharge proprement le modèle -->
     <a-assets timeout="45000">
       <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
     </a-assets>
 
     <a-camera look-controls="enabled: true"></a-camera>
 
-    <!-- Racine liée à la cible (index 0) -->
     <a-entity id="markerRoot" mindar-image-target="targetIndex: 0">
-      <!-- Mets un offset simple; ajuste après -->
       <a-entity id="tacheo"
-                gltf-model="#tacheoModel"
-                position="0 0 -0.5"
-                rotation="0 0 0"
-                scale="0.3 0.3 0.3">
+        gltf-model="#tacheoModel"
+        position="0 0 -0.5"
+        rotation="0 0 0"
+        scale="0.3 0.3 0.3">
       </a-entity>
     </a-entity>
   </a-scene>
@@ -53,114 +55,104 @@
     <button id="lockBtn" disabled>Verrouiller</button>
     <button id="unlockBtn" disabled>Déverrouiller</button>
   </div>
-<script>
-  const sceneEl   = document.querySelector('a-scene');
-  const marker    = document.getElementById('markerRoot');
-  const tacheo    = document.getElementById('tacheo');
-  const statusEl  = document.getElementById('status');
-  const lockBtn   = document.getElementById('lockBtn');
-  const unlockBtn = document.getElementById('unlockBtn');
 
-  let THREEjs = null;
-  let locked = false, foundOnce = false;
+  <script>
+    const sceneEl   = document.querySelector('a-scene');
+    const marker    = document.getElementById('markerRoot');
+    const tacheo    = document.getElementById('tacheo');
+    const statusEl  = document.getElementById('status');
+    const lockBtn   = document.getElementById('lockBtn');
+    const unlockBtn = document.getElementById('unlockBtn');
 
-  const setStatus = (m)=> statusEl && (statusEl.textContent = m);
+    let THREEjs = null;
+    let locked = false, foundOnce = false;
 
-  sceneEl.addEventListener('loaded', () => {
-    THREEjs = AFRAME.THREE;
-    console.log('AFRAME', AFRAME.version, 'MindAR?', !!sceneEl.systems['mindar-image-system']);
-  });
+    const setStatus = (m)=> statusEl && (statusEl.textContent = m);
 
-  marker.addEventListener('targetFound', () => {
-    foundOnce = true;
-    if (!locked) {
-      setStatus('Cible détectée — tu peux verrouiller.');
-      lockBtn.disabled   = false;
-      unlockBtn.disabled = true;
-    } else {
-      setStatus('Cible détectée (objet déjà verrouillé).');
-    }
-  });
+    sceneEl.addEventListener('loaded', () => {
+      THREEjs = AFRAME.THREE;
+      console.log('AFRAME', AFRAME.version, 'MindAR?', !!sceneEl.systems['mindar-image-system']);
+    });
 
-  marker.addEventListener('targetLost', () => {
-    if (!locked) {
-      setStatus('Cible perdue — vise la cible.');
+    // Détection / perte
+    marker.addEventListener('targetFound', () => {
+      foundOnce = true;
+      setStatus(locked ? 'Cible détectée (objet verrouillé).' : 'Cible détectée — tu peux verrouiller.');
+      lockBtn.disabled   = locked;
+      unlockBtn.disabled = !locked;
+    });
+
+    marker.addEventListener('targetLost', () => {
+      // NE PAS arrêter MindAR : garder la caméra active
+      setStatus(locked ? 'Cible perdue (objet reste affiché).' : 'Cible perdue — vise la cible.');
       lockBtn.disabled   = true;
-      unlockBtn.disabled = false;
-    } else {
-      setStatus('Cible perdue — objet figé.');
-    }
-  });
+      unlockBtn.disabled = !locked;
+      if (locked) {
+        // s’assurer que l’objet reste visible même si le marker est masqué
+        tacheo.setAttribute('visible', true);
+      }
+    });
 
-  // 🔒 Verrouiller = fige l’objet à la dernière pose monde et arrête MindAR
-  lockBtn.addEventListener('click', () => {
-    if (!foundOnce || locked) return;
+    // 🔒 Verrouiller : détacher de la cible, garder pose monde — SANS arrêter MindAR
+    lockBtn.addEventListener('click', () => {
+      if (!foundOnce || locked) return;
 
-    try {
-      const pos  = new THREEjs.Vector3();
-      const quat = new THREEjs.Quaternion();
-      const scl  = new THREEjs.Vector3();
-      tacheo.object3D.getWorldPosition(pos);
-      tacheo.object3D.getWorldQuaternion(quat);
-      tacheo.object3D.getWorldScale(scl);
+      try {
+        const pos  = new THREEjs.Vector3();
+        const quat = new THREEjs.Quaternion();
+        const scl  = new THREEjs.Vector3();
+        tacheo.object3D.getWorldPosition(pos);
+        tacheo.object3D.getWorldQuaternion(quat);
+        tacheo.object3D.getWorldScale(scl);
 
-      // Re-parent DOM : marker -> scene
-      marker.removeChild(tacheo);
-      sceneEl.appendChild(tacheo);
+        // Re-parent DOM : marker -> scène
+        marker.removeChild(tacheo);
+        sceneEl.appendChild(tacheo);
 
-      // Applique POSE MONDE et fige les matrices
-      tacheo.object3D.position.copy(pos);
-      tacheo.object3D.quaternion.copy(quat);
-      tacheo.object3D.scale.copy(scl);
-      tacheo.object3D.updateMatrix();
-      tacheo.object3D.updateMatrixWorld(true);
-      tacheo.object3D.matrixAutoUpdate = false; // on fige
+        // Réapplique la pose monde (et on laisse matrixAutoUpdate = true)
+        tacheo.object3D.position.copy(pos);
+        tacheo.object3D.quaternion.copy(quat);
+        tacheo.object3D.scale.copy(scl);
+        tacheo.object3D.updateMatrixWorld(true);
 
-      tacheo.setAttribute('visible', true);
+        tacheo.setAttribute('visible', true);
 
-      // Stoppe MindAR pour ne plus demander de rescanner
-      const sys = sceneEl.systems['mindar-image-system'];
-      if (sys && sys.stop) sys.stop();
+        // Masquer l’overlay de scan (sans couper la vidéo)
+        document.body.classList.add('locked');
 
-      locked = true;
-      lockBtn.disabled   = true;
-      unlockBtn.disabled = false;
-      setStatus('Objet verrouillé ✔ (figé à l’écran)');
-    } catch (e) {
-      console.error('Lock error:', e);
-      setStatus('Erreur lors du verrouillage (voir console).');
-    }
-  });
+        locked = true;
+        lockBtn.disabled   = true;
+        unlockBtn.disabled = false;
+        setStatus('Objet verrouillé ✔ (caméra toujours active)');
+      } catch (e) {
+        console.error('Lock error:', e);
+        setStatus('Erreur verrouillage (console).');
+      }
+    });
 
-  // 🔓 Déverrouiller = reprend MindAR et remet l’objet sous le marker
-  unlockBtn.addEventListener('click', async () => {
-    if (!locked) return;
+    // 🔓 Déverrouiller : remettre sous marker, offset initial
+    unlockBtn.addEventListener('click', () => {
+      if (!locked) return;
 
-    try {
-      // Remettre sous le marker, rétablir l’offset initial
-      sceneEl.removeChild(tacheo);
-      marker.appendChild(tacheo);
+      try {
+        sceneEl.removeChild(tacheo);
+        marker.appendChild(tacheo);
 
-      tacheo.object3D.matrixAutoUpdate = true;
-      tacheo.setAttribute('position', '0 0 -0.5');
-      tacheo.setAttribute('rotation', '0 0 0');
-      // tacheo.setAttribute('scale', '0.3 0.3 0.3'); // si besoin
+        tacheo.setAttribute('position', '0 0 -0.5');
+        tacheo.setAttribute('rotation', '0 0 0');
+        // tacheo.setAttribute('scale', '0.3 0.3 0.3'); // si besoin
 
-      // Relancer MindAR
-      const sys = sceneEl.systems['mindar-image-system'];
-      if (sys && sys.start) await sys.start();
+        document.body.classList.remove('locked');
 
-      locked = false;
-      lockBtn.disabled   = !foundOnce;
-      unlockBtn.disabled = true;
-      setStatus('Déverrouillé — vise la cible pour reprendre.');
-    } catch (e) {
-      console.error('Unlock error:', e);
-      setStatus('Erreur lors du déverrouillage (voir console).');
-    }
-  });
-</script>
+        locked = false;
+        lockBtn.disabled   = !foundOnce;
+        unlockBtn.disabled = true;
+        setStatus('Déverrouillé — vise la cible pour reprendre.');
+      } catch (e) {
+        console.error('Unlock error:', e);
+        setStatus('Erreur déverrouillage (console).');
+      }
+    });
+  </script>
 </body>
 </html>
-
-
