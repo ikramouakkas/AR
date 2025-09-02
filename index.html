@@ -2,42 +2,52 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Tachéo AR — MindAR (fix vidéo)</title>
+  <!-- désactive le pinch-zoom qui te “révèle” la vidéo en dehors de l’écran -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Tachéo AR — Android fullscreen fix</title>
 
-  <!-- A-Frame AVANT MindAR -->
+  <!-- A-Frame puis MindAR (versions stables) -->
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
   <script src="https://unpkg.com/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
-    html,body{height:100%;margin:0;background:#000;overflow:hidden}
-    /* plein écran pour la scène */
-    a-scene{position:fixed;inset:0;width:100vw;height:100vh;display:block}
-    /* le canvas A-Frame doit être TRANSPARENT pour laisser voir la vidéo */
-    canvas, .a-canvas{background: transparent !important;}
-    /* la vidéo/canvas doivent couvrir l’écran sans bandes */
-    video,canvas{object-fit:cover !important}
-    /* étire aussi les overlays MindAR */
-    .mindar-ui-loading,.mindar-ui-scanning,.mindar-ui-compatibility{
-      position:fixed !important;inset:0 !important;width:100vw !important;height:100vh !important
+    /* baseline plein écran */
+    html, body { height: 100%; margin: 0; background:#000; overflow: hidden; touch-action: none; }
+    /* A-Frame prend tout l'écran */
+    a-scene { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; display: block; }
+    /* Force la vidéo et le canvas à couvrir le viewport (évite besoin de dézoomer) */
+    video, canvas, .a-canvas {
+      position: fixed !important;
+      top: 0 !important; left: 0 !important;
+      width: 100vw !important; height: 100vh !important;
+      max-width: 100vw !important; max-height: 100vh !important;
+      object-fit: cover !important;
+      background: transparent !important;
     }
-    /* petite barre d’état + boutons */
-    #status{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.55);color:#fff;padding:6px 10px;border-radius:8px;font-size:13px}
-    .ui{position:fixed;left:0;right:0;bottom:14px;display:flex;gap:10px;justify-content:center}
-    .ui button{padding:10px 14px;border:none;border-radius:10px;font-size:15px;color:#fff}
-    #lockBtn{background:#16a34a} #unlockBtn{background:#334155}
+    /* MindAR overlays plein écran */
+    .mindar-ui-loading, .mindar-ui-scanning, .mindar-ui-compatibility {
+      position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important;
+    }
+    /* Petit HUD */
+    #status {
+      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,.55); color:#fff; padding: 6px 10px; border-radius: 8px; font-size: 13px; z-index: 10;
+    }
+    .ui { position: fixed; left:0; right:0; bottom:14px; display:flex; gap:10px; justify-content:center; z-index: 10; }
+    .ui button { padding:10px 14px; border:none; border-radius:10px; font-size:15px; color:#fff }
+    #lockBtn{ background:#16a34a } #unlockBtn{ background:#334155 }
   </style>
 </head>
 <body>
   <div id="status">Scan de la cible…</div>
 
+  <!-- REMARQUE: on ENLÈVE 'embedded' pour laisser A-Frame gérer le plein écran -->
   <a-scene
     mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
-    embedded
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: true"
-    renderer="alpha: true; antialias: true"        <!-- 👈 alpha=transparent -->
-    background="color: #00000000">                  <!-- 👈 fond transparent -->
+    renderer="alpha: true; antialias: true"
+    background="color: #00000000">
 
     <a-assets timeout="45000">
       <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
@@ -45,7 +55,6 @@
 
     <a-camera look-controls="enabled: true"></a-camera>
 
-    <!-- Ancre sur la cible (index 0) -->
     <a-entity id="markerRoot" mindar-image-target="targetIndex: 0">
       <a-entity id="tacheo"
         gltf-model="#tacheoModel"
@@ -70,9 +79,9 @@
     const unlockBtn = document.getElementById('unlockBtn');
 
     let locked = false, foundOnce = false;
+    const setStatus = (m)=> statusEl.textContent = m;
 
-    function setStatus(m){ statusEl.textContent = m; }
-
+    // MindAR events
     marker.addEventListener('targetFound', () => {
       foundOnce = true;
       setStatus(locked ? 'Cible trouvée (objet verrouillé).' : 'Cible trouvée — tu peux verrouiller.');
@@ -86,7 +95,7 @@
       unlockBtn.disabled = !locked;
     });
 
-    // Verrouiller : détacher de la cible, garder la pose monde
+    // Verrouiller = détacher du marker, garder la pose monde
     lockBtn.addEventListener('click', () => {
       if (!foundOnce || locked) return;
 
@@ -105,24 +114,24 @@
       tacheo.setAttribute('scale', `${worldScl.x} ${worldScl.y} ${worldScl.z}`);
 
       locked = true;
-      lockBtn.disabled = true;
+      lockBtn.disabled   = true;
       unlockBtn.disabled = false;
       setStatus('Objet verrouillé ✔');
     });
 
-    // Déverrouiller : ré-attacher sous la cible avec l’offset initial
+    // Déverrouiller = revenir sous la cible
     unlockBtn.addEventListener('click', () => {
       if (!locked) return;
       marker.object3D.attach(tacheo.object3D);
       tacheo.setAttribute('position', '0 0 -0.5');
       tacheo.setAttribute('rotation', '0 0 0');
       locked = false;
-      lockBtn.disabled = !foundOnce;
+      lockBtn.disabled   = !foundOnce;
       unlockBtn.disabled = true;
       setStatus('Déverrouillé — vise la cible pour reprendre.');
     });
 
-    // Petit log de vérification
+    // log de sanity-check
     sceneEl.addEventListener('loaded', () => {
       console.log('AFRAME', AFRAME.version, 'MindAR?', !!sceneEl.systems['mindar-image-system']);
     });
