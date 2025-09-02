@@ -3,33 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tachéo AR — MindAR</title>
-  <!-- IMPORTANT: A-Frame AVANT MindAR -->
+  <title>MindAR — Test cible</title>
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.1.5/dist/mindar-image-aframe.prod.js"></script>
   <style>body{margin:0;overflow:hidden}</style>
 </head>
 <body>
-  <a-scene
-    mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
-    embedded
-    vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: true">
+  <a-scene mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
+           embedded vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: true">
 
-    <!-- Caméra -->
-    <a-camera position="0 0 0" look-controls="enabled: true"></a-camera>
+    <a-camera look-controls="enabled: true"></a-camera>
 
-    <!-- La cible (index 0 du .mind) -->
     <a-entity mindar-image-target="targetIndex: 0">
-      <!-- Ton tachéomètre avec un offset (50 cm devant la cible) -->
-      <a-entity
-        gltf-model="./modele.glb"
-        position="0 0 -0.5"
-        rotation="0 0 0"
-        scale="0.3 0.3 0.3">
-      </a-entity>
+      <a-box position="0 0 -0.5" depth="0.1" height="0.1" width="0.1" material="color: red"></a-box>
     </a-entity>
   </a-scene>
 </body>
 </html>
-
