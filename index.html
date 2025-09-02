@@ -1,135 +1,28 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
-  <title>Tachéo AR — MindAR (fix)</title>
-
-  <!-- A-Frame avant MindAR (versions stables) -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>TEST A — MindAR minimal</title>
+  <!-- versions stables, ordre crucial -->
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
   <script src="https://unpkg.com/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
-
-  <style>
-    html,body{height:100%;margin:0;background:#000;overflow:hidden;touch-action:none}
-    /* Scène plein écran */
-    a-scene{position:fixed !important; inset:0 !important; width:100vw !important; height:100vh !important; display:block}
-    /* Canvas transparent pour voir la vidéo MindAR derrière */
-    canvas, .a-canvas{background: transparent !important;}
-    /* Vidéo/canvas couvrent l’écran (évite le besoin de dézoomer) */
-    video, canvas{
-      position:fixed !important; top:0 !important; left:0 !important;
-      width:100vw !important; height:100vh !important; max-width:100vw !important; max-height:100vh !important;
-      object-fit:cover !important;
-    }
-    /* Overlays MindAR plein écran */
-    .mindar-ui-loading, .mindar-ui-scanning, .mindar-ui-compatibility{
-      position:fixed !important; inset:0 !important; width:100vw !important; height:100vh !important;
-    }
-    /* HUD */
-    #status{
-      position:fixed; top:10px; left:50%; transform:translateX(-50%);
-      background:rgba(0,0,0,.55); color:#fff; padding:6px 10px; border-radius:8px; font-size:13px; z-index:10;
-    }
-    .ui{ position:fixed; left:0; right:0; bottom:14px; display:flex; gap:10px; justify-content:center; z-index:10; }
-    .ui button{ padding:10px 14px; border:none; border-radius:10px; font-size:15px; color:#fff }
-    #lockBtn{background:#16a34a} #unlockBtn{background:#334155}
-  </style>
+  <style>body{margin:0;overflow:hidden;background:#000}</style>
 </head>
 <body>
-  <div id="status">Scan de la cible…</div>
-
   <a-scene
     mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
     vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: true"
-    renderer="alpha: true; antialias: true">
-
-    <a-assets timeout="45000">
-      <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
-    </a-assets>
-
+    device-orientation-permission-ui="enabled: true">
     <a-camera look-controls="enabled: true"></a-camera>
-
-    <a-entity id="markerRoot" mindar-image-target="targetIndex: 0">
-      <a-entity id="tacheo"
-        gltf-model="#tacheoModel"
-        position="0 0 -0.5"
-        rotation="0 0 0"
-        scale="0.3 0.3 0.3">
-      </a-entity>
+    <a-entity mindar-image-target="targetIndex: 0">
+      <a-box position="0 0 -0.3" depth="0.1" height="0.1" width="0.1" material="color: red"></a-box>
     </a-entity>
   </a-scene>
-
-  <div class="ui">
-    <button id="lockBtn" disabled>Verrouiller</button>
-    <button id="unlockBtn" disabled>Déverrouiller</button>
-  </div>
-
   <script>
-    const sceneEl   = document.querySelector('a-scene');
-    const marker    = document.getElementById('markerRoot');
-    const tacheo    = document.getElementById('tacheo');
-    const statusEl  = document.getElementById('status');
-    const lockBtn   = document.getElementById('lockBtn');
-    const unlockBtn = document.getElementById('unlockBtn');
-
-    let locked = false, foundOnce = false;
-    const setStatus = (m)=> statusEl.textContent = m;
-
-    // Optionnel: s'assurer que le clearColor a bien un alpha 0
-    sceneEl.addEventListener('loaded', () => {
-      const r = sceneEl.renderer;
-      if (r && r.setClearColor) r.setClearColor(0x000000, 0); // noir, alpha=0
-      console.log('AFRAME', AFRAME.version, 'MindAR?', !!sceneEl.systems['mindar-image-system']);
-    });
-
-    marker.addEventListener('targetFound', () => {
-      foundOnce = true;
-      setStatus(locked ? 'Cible trouvée (objet verrouillé).' : 'Cible trouvée — tu peux verrouiller.');
-      lockBtn.disabled   = locked;
-      unlockBtn.disabled = !locked;
-    });
-
-    marker.addEventListener('targetLost', () => {
-      setStatus(locked ? 'Cible perdue (objet reste affiché).' : 'Cible perdue — vise la cible.');
-      lockBtn.disabled   = true;
-      unlockBtn.disabled = !locked;
-    });
-
-    // Verrouiller = détacher de la cible et garder la pose monde
-    lockBtn.addEventListener('click', () => {
-      if (!foundOnce || locked) return;
-
-      const worldPos  = new THREE.Vector3();
-      const worldQuat = new THREE.Quaternion();
-      const worldScl  = new THREE.Vector3();
-      tacheo.object3D.getWorldPosition(worldPos);
-      tacheo.object3D.getWorldQuaternion(worldQuat);
-      tacheo.object3D.getWorldScale(worldScl);
-
-      sceneEl.object3D.attach(tacheo.object3D);
-
-      tacheo.setAttribute('position', `${worldPos.x} ${worldPos.y} ${worldPos.z}`);
-      const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
-      tacheo.setAttribute('rotation', `${THREE.Math.radToDeg(euler.x)} ${THREE.Math.radToDeg(euler.y)} ${THREE.Math.radToDeg(euler.z)}`);
-      tacheo.setAttribute('scale', `${worldScl.x} ${worldScl.y} ${worldScl.z}`);
-
-      locked = true;
-      lockBtn.disabled   = true;
-      unlockBtn.disabled = false;
-      setStatus('Objet verrouillé ✔');
-    });
-
-    // Déverrouiller = revenir sous la cible
-    unlockBtn.addEventListener('click', () => {
-      if (!locked) return;
-      marker.object3D.attach(tacheo.object3D);
-      tacheo.setAttribute('position', '0 0 -0.5');
-      tacheo.setAttribute('rotation', '0 0 0');
-      locked = false;
-      lockBtn.disabled   = !foundOnce;
-      unlockBtn.disabled = true;
-      setStatus('Déverrouillé — vise la cible pour reprendre.');
+    const scene = document.querySelector('a-scene');
+    scene.addEventListener('loaded', () => {
+      console.log('AFRAME', AFRAME.version, 'MindAR system?', !!scene.systems['mindar-image-system']);
     });
   </script>
 </body>
