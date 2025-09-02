@@ -3,20 +3,52 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MindAR — Test cible</title>
-  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.1.5/dist/mindar-image-aframe.prod.js"></script>
+  <title>Tachéo AR — MindAR stable</title>
+
+  <!-- A-Frame (version récente et compatible) -->
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+
+  <!-- MindAR pour A-Frame (version connue stable) -->
+  <script src="https://unpkg.com/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+
   <style>body{margin:0;overflow:hidden}</style>
 </head>
 <body>
-  <a-scene mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
-           embedded vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: true">
+  <a-scene
+    mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
+    embedded
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: true">
 
-    <a-camera look-controls="enabled: true"></a-camera>
+    <!-- Caméra -->
+    <a-camera position="0 0 0" look-controls="enabled: true"></a-camera>
 
+    <!-- Cible (index 0) -->
     <a-entity mindar-image-target="targetIndex: 0">
-      <a-box position="0 0 -0.5" depth="0.1" height="0.1" width="0.1" material="color: red"></a-box>
+      <!-- Test rapide : cube visible même si le .glb a un souci -->
+      <a-box position="0 0 -0.3" depth="0.1" height="0.1" width="0.1" material="color: red"></a-box>
+
+      <!-- Puis ton modèle (décommente après avoir vu le cube) -->
+      <!--
+      <a-entity
+        gltf-model="./modele.glb"
+        position="0 0 -0.5"
+        rotation="0 0 0"
+        scale="0.3 0.3 0.3">
+      </a-entity>
+      -->
     </a-entity>
   </a-scene>
+
+  <script>
+    // Petit check: voir si le system est là
+    document.addEventListener('DOMContentLoaded', () => {
+      const scene = document.querySelector('a-scene');
+      scene.addEventListener('loaded', () => {
+        console.log('AFRAME version:', AFRAME.version);
+        console.log('MindAR system present?', !!scene.systems['mindar-image-system']);
+      });
+    });
+  </script>
 </body>
 </html>
