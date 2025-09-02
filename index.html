@@ -2,16 +2,37 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tachéo AR — MindAR stable</title>
+  <!-- important sur mobile (iOS/Android) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Tachéo AR — plein écran</title>
 
-  <!-- A-Frame (version récente et compatible) -->
+  <!-- A-Frame puis MindAR (versions stables) -->
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-
-  <!-- MindAR pour A-Frame (version connue stable) -->
   <script src="https://unpkg.com/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
-  <style>body{margin:0;overflow:hidden}</style>
+  <style>
+    /* plein écran réel, même avec la barre d'adresse mobile */
+    html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+    /* forcer la scène à occuper tout l'écran */
+    a-scene {
+      position: fixed !important;
+      inset: 0;            /* top:0; right:0; bottom:0; left:0 */
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+    /* s'assurer que le rendu vidéo/canvas couvre bien (évite bandes) */
+    video, canvas {
+      object-fit: cover !important;
+    }
+    /* MindAR UI (barre de scan/overlay) doit aussi être en plein écran */
+    .mindar-ui-loading, .mindar-ui-scanning, .mindar-ui-compatibility {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+    }
+  </style>
 </head>
 <body>
   <a-scene
@@ -20,15 +41,13 @@
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: true">
 
-    <!-- Caméra -->
-    <a-camera position="0 0 0" look-controls="enabled: true"></a-camera>
+    <a-camera look-controls="enabled: true"></a-camera>
 
-    <!-- Cible (index 0) -->
     <a-entity mindar-image-target="targetIndex: 0">
-      <!-- Test rapide : cube visible même si le .glb a un souci -->
+      <!-- modèle test: cube rouge pour valider plein écran + tracking -->
       <a-box position="0 0 -0.3" depth="0.1" height="0.1" width="0.1" material="color: red"></a-box>
 
-      <!-- Puis ton modèle (décommente après avoir vu le cube) -->
+      <!-- quand c'est bon, remets ton glb et enlève le cube -->
       <!--
       <a-entity
         gltf-model="./modele.glb"
@@ -41,14 +60,13 @@
   </a-scene>
 
   <script>
-    // Petit check: voir si le system est là
-    document.addEventListener('DOMContentLoaded', () => {
-      const scene = document.querySelector('a-scene');
-      scene.addEventListener('loaded', () => {
-        console.log('AFRAME version:', AFRAME.version);
-        console.log('MindAR system present?', !!scene.systems['mindar-image-system']);
-      });
-    });
+    /* petit fix “100vh” mobile : adapte à la hauteur réelle de la fenêtre */
+    function setVH() {
+      document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px');
+    }
+    setVH();
+    window.addEventListener('resize', setVH);
+    // si tu préfères, tu peux utiliser: height: calc(var(--vh) * 100) sur a-scene
   </script>
 </body>
 </html>
