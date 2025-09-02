@@ -31,9 +31,9 @@
     <!-- pas de renderer/background custom ici -->
 
     <!-- Précharge proprement le modèle -->
-    <a-entity gltf-model="https://modelviewer.dev/shared-assets/models/Astronaut.glb"
-          position="0 0 -0.5" scale="1 1 1"></a-entity>
-
+    <a-assets timeout="45000">
+      <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
+    </a-assets>
 
     <a-camera look-controls="enabled: true"></a-camera>
 
@@ -122,4 +122,3 @@
   </script>
 </body>
 </html>
-
