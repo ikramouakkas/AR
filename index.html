@@ -53,72 +53,98 @@
     <button id="lockBtn" disabled>Verrouiller</button>
     <button id="unlockBtn" disabled>Déverrouiller</button>
   </div>
+<script>
+  const sceneEl   = document.querySelector('a-scene');
+  const marker    = document.getElementById('markerRoot');
+  const tacheo    = document.getElementById('tacheo');
+  const statusEl  = document.getElementById('status');
+  const lockBtn   = document.getElementById('lockBtn');
+  const unlockBtn = document.getElementById('unlockBtn');
 
-  <script>
-    const sceneEl   = document.querySelector('a-scene');
-    const marker    = document.getElementById('markerRoot');
-    const tacheo    = document.getElementById('tacheo');
-    const statusEl  = document.getElementById('status');
-    const lockBtn   = document.getElementById('lockBtn');
-    const unlockBtn = document.getElementById('unlockBtn');
+  // ✅ toujours prendre THREE via AFRAME
+  let THREEjs = null;
 
-    let locked = false, foundOnce = false;
-    const setStatus = (m)=> statusEl.textContent = m;
+  let locked = false, foundOnce = false;
+  const setStatus = (m)=> statusEl.textContent = m;
 
-    // Logs sanity check
-    sceneEl.addEventListener('loaded', () => {
-      console.log('AFRAME', AFRAME.version, 'MindAR?', !!sceneEl.systems['mindar-image-system']);
-    });
+  sceneEl.addEventListener('loaded', () => {
+    THREEjs = AFRAME.THREE;
+    console.log('AFRAME', AFRAME.version, 'MindAR?', !!sceneEl.systems['mindar-image-system']);
+  });
 
-    // MindAR events
-    marker.addEventListener('targetFound', () => {
-      foundOnce = true;
-      setStatus(locked ? 'Cible trouvée (objet verrouillé).' : 'Cible trouvée — tu peux verrouiller.');
-      lockBtn.disabled   = locked;
-      unlockBtn.disabled = !locked;
-    });
+  // MindAR events
+  marker.addEventListener('targetFound', () => {
+    foundOnce = true;
+    setStatus(locked ? 'Cible trouvée (objet verrouillé).' : 'Cible trouvée — tu peux verrouiller.');
+    lockBtn.disabled   = locked;
+    unlockBtn.disabled = !locked;
+  });
 
-    marker.addEventListener('targetLost', () => {
-      setStatus(locked ? 'Cible perdue (objet reste affiché).' : 'Cible perdue — vise la cible.');
-      lockBtn.disabled   = true;
-      unlockBtn.disabled = !locked;
-    });
+  marker.addEventListener('targetLost', () => {
+    setStatus(locked ? 'Cible perdue (objet reste affiché).' : 'Cible perdue — vise la cible.');
+    lockBtn.disabled   = true;
+    unlockBtn.disabled = !locked;
+  });
 
-    // Verrouiller = détacher du marker, garder la pose monde
-    lockBtn.addEventListener('click', () => {
-      if (!foundOnce || locked) return;
+  // 🔒 Verrouiller = sortir l'entité du marker, en gardant sa POSE MONDE
+  lockBtn.addEventListener('click', () => {
+    if (!foundOnce || locked) return;
+    try {
+      // 1) lire la pose monde AVANT re-parenting
+      const pos  = new THREEjs.Vector3();
+      const quat = new THREEjs.Quaternion();
+      const scl  = new THREEjs.Vector3();
+      tacheo.object3D.getWorldPosition(pos);
+      tacheo.object3D.getWorldQuaternion(quat);
+      tacheo.object3D.getWorldScale(scl);
 
-      const worldPos  = new THREE.Vector3();
-      const worldQuat = new THREE.Quaternion();
-      const worldScl  = new THREE.Vector3();
-      tacheo.object3D.getWorldPosition(worldPos);
-      tacheo.object3D.getWorldQuaternion(worldQuat);
-      tacheo.object3D.getWorldScale(worldScl);
+      // 2) re-parenter AU NIVEAU DOM (plus fiable que object3D.attach)
+      //    - retire du marker, ajoute sous la scène
+      marker.removeChild(tacheo);
+      sceneEl.appendChild(tacheo);
 
-      sceneEl.object3D.attach(tacheo.object3D);
+      // 3) réappliquer la pose monde
+      tacheo.object3D.position.copy(pos);
+      tacheo.object3D.quaternion.copy(quat);
+      tacheo.object3D.scale.copy(scl);
+      tacheo.object3D.updateMatrixWorld(true);
 
-      tacheo.setAttribute('position', `${worldPos.x} ${worldPos.y} ${worldPos.z}`);
-      const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
-      tacheo.setAttribute('rotation', `${THREE.Math.radToDeg(euler.x)} ${THREE.Math.radToDeg(euler.y)} ${THREE.Math.radToDeg(euler.z)}`);
-      tacheo.setAttribute('scale', `${worldScl.x} ${worldScl.y} ${worldScl.z}`);
+      // 4) assurer que l’objet reste visible même si MindAR masque le marker
+      tacheo.setAttribute('visible', true);
 
       locked = true;
       lockBtn.disabled   = true;
       unlockBtn.disabled = false;
       setStatus('Objet verrouillé ✔');
-    });
+    } catch (e) {
+      console.error('Lock error:', e);
+      setStatus('Erreur lors du verrouillage (voir console).');
+    }
+  });
 
-    // Déverrouiller = revenir sous la cible
-    unlockBtn.addEventListener('click', () => {
-      if (!locked) return;
-      marker.object3D.attach(tacheo.object3D);
+  // 🔓 Déverrouiller = remettre l'entité sous le marker, avec l’offset initial
+  unlockBtn.addEventListener('click', () => {
+    if (!locked) return;
+    try {
+      // 1) sortir de la scène et remettre sous le marker
+      sceneEl.removeChild(tacheo);
+      marker.appendChild(tacheo);
+
+      // 2) reposer l'offset initial (ajuste à ta convenance)
       tacheo.setAttribute('position', '0 0 -0.5');
       tacheo.setAttribute('rotation', '0 0 0');
+      // tacheo.setAttribute('scale', '0.3 0.3 0.3'); // si tu veux forcer l’échelle initiale
+
       locked = false;
       lockBtn.disabled   = !foundOnce;
       unlockBtn.disabled = true;
       setStatus('Déverrouillé — vise la cible pour reprendre.');
-    });
-  </script>
+    } catch (e) {
+      console.error('Unlock error:', e);
+      setStatus('Erreur lors du déverrouillage (voir console).');
+    }
+  });
+</script>
 </body>
 </html>
+
