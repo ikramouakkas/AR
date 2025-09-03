@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <!-- Règle la mise à l’échelle sur mobile et autorise l’AR plein écran -->
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>AR ESGT — MindAR + Verrouillage</title>
+
+  <!-- A-Frame (moteur 3D WebGL) : À charger AVANT MindAR -->
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <!-- Adaptateur MindAR pour A-Frame (suivi "image-target") -->
+  <script src="https://unpkg.com/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+
+  <style>
+    /* Mise en page simple */
+    body { margin: 0; overflow: hidden; background: #000; font-family: system-ui, Arial, sans-serif; }
+    #status {
+      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,.55); color: #fff; padding: 6px 10px; border-radius: 8px; font-size: 13px; z-index: 10;
+    }
+    .ui {
+      position: fixed; left: 0; right: 0; bottom: 14px; display: flex; gap: 10px; justify-content: center; z-index: 10;
+    }
+    .ui button {
+      padding: 10px 14px; border: none; border-radius: 10px; font-size: 15px; color: #fff;
+    }
+    #lockBtn   { background: #16a34a; }
+    #unlockBtn { background: #334155; }
+  </style>
+</head>
+<body>
+  <!-- Petit bandeau d’état -->
+  <div id="status">Scan de la cible…</div>
+
+  <!--
+    mindar-image pour activer MindAR en mode image-target (fichier .mind).
+    autoStart: true → démarre la webcam dès que possible (Il faut autoriser la caméra).
+    device-orientation-permission-ui: demande d’accès sur iOS.
+  -->
+  <a-scene
+    mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: true">
+
+    <!--
+      <a-assets> : précharge le modèle .glb.
+    -->
+    <a-assets timeout="45000">
+      <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
+    </a-assets>
+
+    <!-- -->
+    <a-camera look-controls="enabled: true"></a-camera>
+
+    <!--
+      <a-entity mindar-image-target> : racine liée à la cible (index 0 dans target.mind).
+      Tout ce qui est enfant “colle” à la pose de l’image réelle détectée.
+    -->
+    <a-entity id="markerRoot" mindar-image-target="targetIndex: 0">
+      <!--
+        Modèle 3D ancré SUR la cible, avec un offset presquee 50cm devant le centre de la cible
+      -->
+      <a-entity id="tacheo"
+                gltf-model="#tacheoModel"
+                position="0 0 -0.5"
+                rotation="0 0 0"
+                scale="0.3 0.3 0.3">
+      </a-entity>
+    </a-entity>
+
+    <!--
+      Résolution du problème :    
+      worldAnchor : noeud “libre” dans la scène (non lié à la cible).
+      On y crée une copie du modèle quand on “verrouille”,
+      pour éviter les soucis de re-parenting et garder l’objet visible
+      même si la cible sort du cadre.
+    -->
+    <a-entity id="worldAnchor" position="0 0 0"></a-entity>
+  </a-scene>
+
+  <!-- UI : boutons Verrouiller/Déverrouiller 
+  Verrouiller lit la pose du modèle sa position, rotatio, et échelle
+  pour créer une copie, au mm endroit sous worldAnchor
+  Déverrouiller supprime cette copie et ré-affiche l'original -->
+<div class="ui">
+  <button id="lockBtn"   disabled>Verrouiller</button>
+  <button id="unlockBtn" disabled>Déverrouiller</button>
+  <button id="worldBtn">Ancrer au monde (Android)</button>
+</div>
+
+
+  <script>
+  const worldBtn = document.getElementById('worldBtn');
+
+  function getWorldPoseOfActiveModel() {
+    // 1) Si tu utilises la "copie" lors du verrouillage
+    const copy = document.querySelector('#worldAnchor > a-entity');
+    const active = (copy && copy.getAttribute('visible') !== false) ? copy : tacheo;
+
+    const THREEjs = AFRAME.THREE;
+    const pos  = new THREEjs.Vector3();
+    const quat = new THREEjs.Quaternion();
+    const scl  = new THREEjs.Vector3();
+
+    active.object3D.getWorldPosition(pos);
+    active.object3D.getWorldQuaternion(quat);
+    active.object3D.getWorldScale(scl);
+
+    const euler = new THREEjs.Euler().setFromQuaternion(quat, 'YXZ');
+    return {
+      position: {x: pos.x, y: pos.y, z: pos.z},
+      rotation: {
+        x: THREEjs.MathUtils.radToDeg(euler.x),
+        y: THREEjs.MathUtils.radToDeg(euler.y),
+        z: THREEjs.MathUtils.radToDeg(euler.z)
+      },
+      scale: {x: scl.x, y: scl.y, z: scl.z}
+    };
+  }
+
+  worldBtn.addEventListener('click', () => {
+    try {
+      const pose = getWorldPoseOfActiveModel();
+      // Sauvegarde la pose et le chemin du modèle pour la page Android
+      sessionStorage.setItem('AR_MODEL_URL', tacheo.getAttribute('gltf-model')); // ex: "#tacheoModel" → on résout plus tard
+      sessionStorage.setItem('AR_POSE_JSON', JSON.stringify(pose));
+      // Ouvre la page d’ancrage monde (Android / Chrome)
+      window.location.href = 'android-ar.html';
+    } catch (e) {
+      console.error(e);
+      alert("Impossible d'initialiser l'ancrage monde. Assure-toi que l'objet est visible.");
+    }
+  });
+</script>
+</body>
+</html>
