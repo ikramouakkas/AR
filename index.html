@@ -82,120 +82,55 @@
   Verrouiller lit la pose du modèle sa position, rotatio, et échelle
   pour créer une copie, au mm endroit sous worldAnchor
   Déverrouiller supprime cette copie et ré-affiche l'original -->
-  <div class="ui">
-    <button id="lockBtn"   disabled>Verrouiller</button>
-    <button id="unlockBtn" disabled>Déverrouiller</button>
-  </div>
+<div class="ui">
+  <button id="lockBtn"   disabled>Verrouiller</button>
+  <button id="unlockBtn" disabled>Déverrouiller</button>
+  <button id="worldBtn">Ancrer au monde (Android)</button>
+</div>
+
 
   <script>
-    // Raccourcis DOM
-    const sceneEl     = document.querySelector('a-scene');
-    const marker      = document.getElementById('markerRoot');
-    const tacheo      = document.getElementById('tacheo');
-    const worldAnchor = document.getElementById('worldAnchor');
-    const statusEl    = document.getElementById('status');
-    const lockBtn     = document.getElementById('lockBtn');
-    const unlockBtn   = document.getElementById('unlockBtn');
+  const worldBtn = document.getElementById('worldBtn');
 
-    // Espace “monde” : on créera une COPIE ici au verrouillage
-    let worldCopy = null;
-    let foundOnce = false;
-    let locked    = false;
-    let THREEjs   = null;
+  function getWorldPoseOfActiveModel() {
+    // 1) Si tu utilises la "copie" lors du verrouillage
+    const copy = document.querySelector('#worldAnchor > a-entity');
+    const active = (copy && copy.getAttribute('visible') !== false) ? copy : tacheo;
 
-    const setStatus = (m)=> { if (statusEl) statusEl.textContent = m; };
+    const THREEjs = AFRAME.THREE;
+    const pos  = new THREEjs.Vector3();
+    const quat = new THREEjs.Quaternion();
+    const scl  = new THREEjs.Vector3();
 
-    // Quand la scène A-Frame est prête : récupère THREE via AFRAME
-    sceneEl.addEventListener('loaded', () => {
-      THREEjs = AFRAME.THREE;
-      console.log('AFRAME', AFRAME.version, 'MindAR system OK?', !!sceneEl.systems['mindar-image-system']);
-    });
+    active.object3D.getWorldPosition(pos);
+    active.object3D.getWorldQuaternion(quat);
+    active.object3D.getWorldScale(scl);
 
-    // MindAR → cible détectée
-    marker.addEventListener('targetFound', () => {
-      foundOnce = true;
-      setStatus(locked ? 'Cible détectée (objet verrouillé).' : 'Cible détectée — tu peux verrouiller.');
-      lockBtn.disabled   = locked;
-      unlockBtn.disabled = !locked;
-      if (!locked) tacheo.setAttribute('visible', true);
-    });
+    const euler = new THREEjs.Euler().setFromQuaternion(quat, 'YXZ');
+    return {
+      position: {x: pos.x, y: pos.y, z: pos.z},
+      rotation: {
+        x: THREEjs.MathUtils.radToDeg(euler.x),
+        y: THREEjs.MathUtils.radToDeg(euler.y),
+        z: THREEjs.MathUtils.radToDeg(euler.z)
+      },
+      scale: {x: scl.x, y: scl.y, z: scl.z}
+    };
+  }
 
-    // MindAR → cible perdue
-    marker.addEventListener('targetLost', () => {
-      setStatus(locked ? 'Cible perdue (objet verrouillé reste visible).' : 'Cible perdue — vise la cible.');
-      lockBtn.disabled   = true;
-      unlockBtn.disabled = !locked;
-    });
-
-    // Verrouiller :
-    // duplication du modèle à la POSE MONDE actuelle et l’attache à worldAnchor (indépendant du marker),
-    // puis cacher l’original (lié au marker).
-    lockBtn.addEventListener('click', () => {
-      if (!foundOnce || locked) return;
-
-      try {
-        const pos  = new THREEjs.Vector3();
-        const quat = new THREEjs.Quaternion();
-        const scl  = new THREEjs.Vector3();
-        tacheo.object3D.getWorldPosition(pos);
-        tacheo.object3D.getWorldQuaternion(quat);
-        tacheo.object3D.getWorldScale(scl);
-
-        // Nettoie une copie précédente si existante
-        if (worldCopy && worldCopy.parentNode) {
-          worldAnchor.removeChild(worldCopy);
-          worldCopy = null;
-        }
-
-        // Crée une nouvelle entité identique
-        worldCopy = document.createElement('a-entity');
-        worldCopy.setAttribute('gltf-model', tacheo.getAttribute('gltf-model'));
-        // Applique la POSE MONDE (rotation convertie en degrés)
-        const euler = new THREEjs.Euler().setFromQuaternion(quat, 'YXZ');
-        worldCopy.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
-        worldCopy.setAttribute('rotation', `${THREEjs.MathUtils.radToDeg(euler.x)} ${THREEjs.MathUtils.radToDeg(euler.y)} ${THREEjs.MathUtils.radToDeg(euler.z)}`);
-        worldCopy.setAttribute('scale', `${scl.x} ${scl.y} ${scl.z}`);
-
-        worldAnchor.appendChild(worldCopy);
-
-        // Cache l’original (il reste sous le marker pour les prochains scans)
-        tacheo.setAttribute('visible', false);
-
-        locked = true;
-        lockBtn.disabled   = true;
-        unlockBtn.disabled = false;
-        setStatus('Objet verrouillé ✔');
-      } catch (e) {
-        console.error('Lock error:', e);
-        setStatus('Erreur verrouillage (console).');
-      }
-    });
-
-    // Déverrouiller :
-    // supprime la copie monde et ré-affiche l’original sous le marker (avec offset initial).
-    unlockBtn.addEventListener('click', () => {
-      if (!locked) return;
-
-      try {
-        if (worldCopy && worldCopy.parentNode) {
-          worldAnchor.removeChild(worldCopy);
-        }
-        worldCopy = null;
-
-        tacheo.setAttribute('visible', true);
-        tacheo.setAttribute('position', '0 0 -0.5');
-        tacheo.setAttribute('rotation', '0 0 0');
-        // tacheo.setAttribute('scale', '0.3 0.3 0.3'); // si besoin
-
-        locked = false;
-        lockBtn.disabled   = !foundOnce;
-        unlockBtn.disabled = true;
-        setStatus('Déverrouillé — vise la cible pour reprendre.');
-      } catch (e) {
-        console.error('Unlock error:', e);
-        setStatus('Erreur déverrouillage (console).');
-      }
-    });
-  </script>
+  worldBtn.addEventListener('click', () => {
+    try {
+      const pose = getWorldPoseOfActiveModel();
+      // Sauvegarde la pose et le chemin du modèle pour la page Android
+      sessionStorage.setItem('AR_MODEL_URL', tacheo.getAttribute('gltf-model')); // ex: "#tacheoModel" → on résout plus tard
+      sessionStorage.setItem('AR_POSE_JSON', JSON.stringify(pose));
+      // Ouvre la page d’ancrage monde (Android / Chrome)
+      window.location.href = 'android-ar.html';
+    } catch (e) {
+      console.error(e);
+      alert("Impossible d'initialiser l'ancrage monde. Assure-toi que l'objet est visible.");
+    }
+  });
+</script>
 </body>
 </html>
