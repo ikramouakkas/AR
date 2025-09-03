@@ -7,59 +7,84 @@
   <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
   <style>
     body{margin:0;overflow:hidden;background:#000}
-    #hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);padding:6px 10px;
-         border-radius:8px;background:rgba(0,0,0,.55);color:#fff;z-index:10}
+    #hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);padding:6px 10px;border-radius:8px;background:rgba(0,0,0,.55);color:#fff;z-index:10}
+    .ui{position:fixed;left:0;right:0;bottom:14px;display:flex;gap:10px;justify-content:center;z-index:10}
+    .ui button{padding:10px 14px;border:none;border-radius:10px;color:#fff;background:#2563eb;font-size:15px}
   </style>
 </head>
 <body>
-  <div id="hud">Démarrer AR → vois-tu l’anneau ?</div>
+  <div id="hud">1) Appuie sur “Démarrer AR”. 2) Balaye la table → anneau vert.</div>
+  <div class="ui"><button id="start">Démarrer AR</button></div>
 
   <a-scene id="scene" vr-mode-ui="enabled:false"
-    webxr="requiredFeatures: hit-test,local; optionalFeatures: dom-overlay; overlayElement: body">
+           webxr="requiredFeatures: hit-test,local; optionalFeatures: dom-overlay; overlayElement: body">
 
+    <!-- Réticule posé par le hit-test -->
     <a-entity id="reticle" visible="false"
-      geometry="primitive:ring;radiusInner:0.03;radiusOuter:0.05"
-      material="shader:flat;color:#00ff00"
-      rotation="-90 0 0"></a-entity>
+              geometry="primitive:ring;radiusInner:0.03;radiusOuter:0.05"
+              material="shader:flat;color:#00ff00"
+              rotation="-90 0 0"></a-entity>
 
-    <a-entity id="box" geometry="primitive:box" material="color:red" visible="false"></a-entity>
+    <!-- Petit cube pour visualiser le point détecté -->
+    <a-entity id="box" geometry="primitive:box" material="color:#ff3333" visible="false"></a-entity>
 
     <a-camera look-controls="enabled:true"></a-camera>
   </a-scene>
 
   <script>
     const hud = document.getElementById('hud');
+    const startBtn = document.getElementById('start');
     const scene = document.getElementById('scene');
     const reticle = document.getElementById('reticle');
     const box = document.getElementById('box');
 
-    let hitTestSource=null, refSpace=null;
+    let hitTestSource = null;
+    let refSpace = null;
 
-    scene.addEventListener('enter-vr', async ()=>{
-      hud.textContent="AR lancé, recherche de surface…";
-      const session=scene.renderer.xr.getSession();
-      const viewerSpace=await session.requestReferenceSpace('viewer');
-      refSpace=await session.requestReferenceSpace('local');
-      hitTestSource=await session.requestHitTestSource({space:viewerSpace});
+    // Démarrer AR sur action utilisateur
+    startBtn.addEventListener('click', async () => {
+      // (optionnel) check support et permissions
+      if (!navigator.xr) { hud.textContent = "WebXR indisponible sur ce navigateur."; return; }
+      const sup = await navigator.xr.isSessionSupported('immersive-ar');
+      if (!sup) { hud.textContent = "AR non disponible (Chrome + Play Services for AR)."; return; }
+
+      scene.enterVR(); // lance la session AR
     });
 
-    scene.addEventListener('renderstart', ()=>{
-      scene.renderer.setAnimationLoop((t,frame)=>{
+    // Quand la session AR démarre
+    scene.addEventListener('enter-vr', async () => {
+      try {
+        const session = scene.renderer.xr.getSession();
+        const viewerSpace = await session.requestReferenceSpace('viewer');
+        refSpace = await session.requestReferenceSpace('local');
+        hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+        hud.textContent = "Balaye la table jusqu'à voir l'anneau vert.";
+      } catch (e) {
+        console.error(e);
+        hud.textContent = "Erreur AR (voir console).";
+      }
+    });
+
+    // Boucle : mise à jour du réticule + cube
+    scene.addEventListener('renderstart', () => {
+      scene.renderer.setAnimationLoop((t, frame) => {
         if (!frame || !hitTestSource || !refSpace) return;
-        const results=frame.getHitTestResults(hitTestSource);
-        if (results.length>0){
-          const pose=results[0].getPose(refSpace);
-          reticle.object3D.position.set(pose.transform.position.x,
-                                        pose.transform.position.y,
-                                        pose.transform.position.z);
-          reticle.object3D.quaternion.set(pose.transform.orientation.x,
-                                          pose.transform.orientation.y,
-                                          pose.transform.orientation.z,
-                                          pose.transform.orientation.w);
-          reticle.setAttribute('visible',true);
-          box.setAttribute('visible',true);
+        const results = frame.getHitTestResults(hitTestSource);
+        if (results.length > 0) {
+          const pose = results[0].getPose(refSpace);
+          const p = pose.transform.position, q = pose.transform.orientation;
+          reticle.object3D.position.set(p.x, p.y, p.z);
+          reticle.object3D.quaternion.set(q.x, q.y, q.z, q.w);
+          if (!reticle.getAttribute('visible')) reticle.setAttribute('visible', true);
+
           box.object3D.position.copy(reticle.object3D.position);
-          hud.textContent="Surface trouvée ✔";
+          if (!box.getAttribute('visible')) box.setAttribute('visible', true);
+
+          hud.textContent = "Surface trouvée ✔";
+        } else {
+          reticle.setAttribute('visible', false);
+          box.setAttribute('visible', false);
+          hud.textContent = "Cherche une surface plane (bonne lumière, texture).";
         }
       });
     });
