@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>AR Monde (Android)</title>
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <style>
+    body{margin:0;overflow:hidden;background:#000;font-family:system-ui,Arial,sans-serif}
+    #hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);color:#fff;background:rgba(0,0,0,.55);padding:6px 10px;border-radius:8px;font-size:13px;z-index:10}
+    .ui{position:fixed;left:0;right:0;bottom:14px;display:flex;gap:10px;justify-content:center;z-index:10}
+    .ui button{padding:10px 14px;border:none;border-radius:10px;font-size:15px;color:#fff}
+    #start{background:#2563eb} #anchor{background:#16a34a} #back{background:#334155}
+  </style>
+</head>
+<body>
+  <div id="hud">1) Démarrer AR • 2) Balaye la table jusqu’à voir l’anneau • 3) “Ancrer ici”.</div>
+  <div class="ui">
+    <button id="start">Démarrer AR</button>
+    <button id="anchor" disabled>Ancrer ici</button>
+    <button id="back">Retour</button>
+  </div>
+
+  <!-- ✅ Syntaxe officielle A-Frame WebXR (pas de 'mode' ni 'sessionMode') -->
+  <a-scene
+    vr-mode-ui="enabled: false"
+    webxr="requiredFeatures: hit-test,anchors,local; optionalFeatures: dom-overlay; overlayElement: body">
+
+    <!-- réticule posé par le hit-test -->
+    <a-entity id="reticle" visible="false"
+              geometry="primitive: ring; radiusInner: 0.03; radiusOuter: 0.05"
+              material="shader: flat"
+              rotation="-90 0 0"></a-entity>
+
+    <!-- pivot qui sera 'anchored' au monde -->
+    <a-entity id="pivot" anchored></a-entity>
+
+    <!-- modèle à afficher (URL remplacée si besoin depuis sessionStorage) -->
+    <a-assets timeout="45000">
+      <a-asset-item id="modelAsset" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
+    </a-assets>
+    <a-entity id="tacheo" gltf-model="#modelAsset" visible="false"></a-entity>
+
+    <a-camera look-controls="enabled:true"></a-camera>
+  </a-scene>
+
+  <script>
+    const scene   = document.querySelector('a-scene');
+    const hud     = document.getElementById('hud');
+    const startBt = document.getElementById('start');
+    const anchorBt= document.getElementById('anchor');
+    const backBt  = document.getElementById('back');
+
+    const reticle = document.getElementById('reticle');
+    const pivot   = document.getElementById('pivot');   // porteur de l'anchor
+    const model   = document.getElementById('tacheo');
+
+    // récupère Δ (offset) et modèle
+    const delta = JSON.parse(sessionStorage.getItem('DELTA_JSON') || '{"position":{"x":0,"y":0,"z":-0.5},"rotation":{"x":0,"y":0,"z":0},"scale":{"x":0.3,"y":0.3,"z":0.3}}');
+    const modelURL = sessionStorage.getItem('MODEL_URL');
+    if (modelURL && modelURL !== '#tacheoModel') model.setAttribute('gltf-model', modelURL);
+
+    let xrSession = null, hitTestSource = null, viewerSpace = null, refSpace = null;
+
+    // démarrer AR (obligatoire: action utilisateur)
+    startBt.addEventListener('click', () => scene.enterVR());
+    backBt.addEventListener('click', () => history.back());
+
+    // quand la session XR démarre
+    scene.addEventListener('enter-vr', async () => {
+      if (!scene.renderer.xr.isPresenting) { hud.textContent = "AR non disponible sur ce navigateur."; return; }
+      xrSession = scene.renderer.xr.getSession();
+      try {
+        viewerSpace = await xrSession.requestReferenceSpace('viewer');
+        refSpace    = await xrSession.requestReferenceSpace('local');
+        hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+        hud.textContent = "Balaye la table jusqu’à voir l’anneau, puis clique 'Ancrer ici'.";
+      } catch (e) {
+        console.error(e);
+        hud.textContent = "Hit-test non disponible. Chrome Android récent requis.";
+      }
+    });
+
+    // boucle XR: mise à jour du réticule
+    scene.addEventListener('renderstart', () => {
+      scene.renderer.setAnimationLoop((t, frame) => {
+        if (!frame || !hitTestSource || !refSpace) { reticle.setAttribute('visible', false); anchorBt.disabled = true; return; }
+        const results = frame.getHitTestResults(hitTestSource);
+        if (results.length > 0) {
+          const pose = results[0].getPose(refSpace);
+          const p = pose.transform.position;
+          const q = pose.transform.orientation;
+          reticle.object3D.position.set(p.x, p.y, p.z);
+          reticle.object3D.quaternion.set(q.x, q.y, q.z, q.w);
+          reticle.setAttribute('visible', true);
+          anchorBt.disabled = false;
+        } else {
+          reticle.setAttribute('visible', false);
+          anchorBt.disabled = true;
+        }
+      });
+    });
+
+    // crée une ANCRE au niveau du réticule + applique l’offset Δ
+    anchorBt.addEventListener('click', () => {
+      if (!reticle.getAttribute('visible')) return;
+      const THREE = AFRAME.THREE;
+
+      // 1) crée l’ancre à la pose actuelle du réticule
+      const pos = reticle.object3D.position.clone();
+      const quat= reticle.object3D.quaternion.clone();
+      pivot.components.anchored.createAnchor(pos, quat); // A-Frame Anchors API
+
+      // 2) attache le modèle AU PIVOT (repère = centre du logo), avec Δ
+      if (model.object3D.parent !== pivot.object3D) {
+        pivot.object3D.add(model.object3D);
+      }
+      model.object3D.position.set(delta.position.x || 0, delta.position.y || 0, delta.position.z || 0);
+      model.object3D.rotation.set(
+        THREE.MathUtils.degToRad(delta.rotation.x || 0),
+        THREE.MathUtils.degToRad(delta.rotation.y || 0),
+        THREE.MathUtils.degToRad(delta.rotation.z || 0)
+      );
+      model.object3D.scale.set(delta.scale.x || 1, delta.scale.y || 1, delta.scale.z || 1);
+      model.setAttribute('visible', true);
+
+      hud.textContent = "Ancre posée ✔ L’objet reste en place. Déplace-toi autour.";
+      reticle.setAttribute('visible', false);
+      anchorBt.disabled = true;
+    });
+  </script>
+</body>
+</html>
