@@ -1,108 +1,68 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>AR Monde (Android)</title>
-<script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-<style>
-  body{margin:0;overflow:hidden;background:#000;font-family:system-ui,Arial}
-  #hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);padding:6px 10px;border-radius:8px;background:rgba(0,0,0,.55);color:#fff;z-index:10}
-  .ui{position:fixed;left:0;right:0;bottom:14px;display:flex;gap:10px;justify-content:center;z-index:10}
-  .ui button{padding:10px 14px;border:none;border-radius:10px;font-size:15px;color:#fff}
-  #start{background:#2563eb} #place{background:#16a34a} #back{background:#334155}
-</style>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <title>Test Hit-Test Minimal</title>
+  <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+  <style>
+    body{margin:0;overflow:hidden;background:#000}
+    #hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);padding:6px 10px;
+         border-radius:8px;background:rgba(0,0,0,.55);color:#fff;z-index:10}
+  </style>
 </head>
 <body>
-<div id="hud">1) Démarrer AR • 2) Balaye la table (anneau) • 3) Ancrer ici.</div>
-<div class="ui">
-  <button id="start">Démarrer AR</button>
-  <button id="place" disabled>Ancrer ici</button>
-  <button id="back">Retour</button>
-</div>
+  <div id="hud">Démarrer AR → vois-tu l’anneau ?</div>
 
-<a-scene id="scene" vr-mode-ui="enabled:false"
-  webxr="requiredFeatures: hit-test,local; optionalFeatures: dom-overlay; overlayElement: body">
-  <a-entity id="reticle" visible="false"
-    geometry="primitive:ring;radiusInner:0.03;radiusOuter:0.05"
-    material="shader:flat" rotation="-90 0 0"></a-entity>
+  <a-scene id="scene" vr-mode-ui="enabled:false"
+    webxr="requiredFeatures: hit-test,local; optionalFeatures: dom-overlay; overlayElement: body">
 
-  <a-assets timeout="45000">
-    <a-asset-item id="assetModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
-  </a-assets>
-  <a-entity id="tacheo" visible="false" gltf-model="#assetModel"></a-entity>
+    <a-entity id="reticle" visible="false"
+      geometry="primitive:ring;radiusInner:0.03;radiusOuter:0.05"
+      material="shader:flat;color:#00ff00"
+      rotation="-90 0 0"></a-entity>
 
-  <a-camera look-controls="enabled:true"></a-camera>
-</a-scene>
+    <a-entity id="box" geometry="primitive:box" material="color:red" visible="false"></a-entity>
 
-<script>
-const hud=document.getElementById('hud'), scene=document.getElementById('scene');
-const startBt=document.getElementById('start'), placeBt=document.getElementById('place'), backBt=document.getElementById('back');
-const reticle=document.getElementById('reticle'), model=document.getElementById('tacheo');
+    <a-camera look-controls="enabled:true"></a-camera>
+  </a-scene>
 
-// offset Δ reçu depuis index.html (MindAR). Valeurs par défaut si absent.
-const delta = JSON.parse(sessionStorage.getItem('DELTA_JSON') || '{"position":{"x":0,"y":0,"z":-0.5},"rotation":{"x":0,"y":0,"z":0},"scale":{"x":0.3,"y":0.3,"z":0.3}}');
-const modelURL = sessionStorage.getItem('MODEL_URL');
-if (modelURL && modelURL !== '#tacheoModel') model.setAttribute('gltf-model', modelURL);
+  <script>
+    const hud = document.getElementById('hud');
+    const scene = document.getElementById('scene');
+    const reticle = document.getElementById('reticle');
+    const box = document.getElementById('box');
 
-let xrSession=null, hitTestSource=null, viewerSpace=null, refSpace=null;
+    let hitTestSource=null, refSpace=null;
 
-startBt.onclick = ()=> scene.enterVR();
-backBt.onclick  = ()=> history.back();
+    scene.addEventListener('enter-vr', async ()=>{
+      hud.textContent="AR lancé, recherche de surface…";
+      const session=scene.renderer.xr.getSession();
+      const viewerSpace=await session.requestReferenceSpace('viewer');
+      refSpace=await session.requestReferenceSpace('local');
+      hitTestSource=await session.requestHitTestSource({space:viewerSpace});
+    });
 
-scene.addEventListener('enter-vr', async ()=>{
-  try{
-    if (!navigator.xr){ hud.textContent="Ce navigateur ne supporte pas WebXR."; return; }
-    const supported = await navigator.xr.isSessionSupported('immersive-ar');
-    if (!supported){ hud.textContent="AR non disponible : mets à jour Chrome et 'Google Play Services for AR'."; return; }
-
-    const xr=scene.renderer.xr;
-    if (!xr.isPresenting){ hud.textContent="La session AR n'a pas démarré."; return; }
-
-    xrSession = xr.getSession();
-    viewerSpace   = await xrSession.requestReferenceSpace('viewer');
-    refSpace      = await xrSession.requestReferenceSpace('local');
-    hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
-
-    hud.textContent="Balaye la table jusqu’à voir l’anneau, puis ‘Ancrer ici’.";
-  }catch(e){ console.error(e); hud.textContent="Erreur AR : regarde la console."; }
-});
-
-scene.addEventListener('renderstart', ()=>{
-  scene.renderer.setAnimationLoop((t,frame)=>{
-    if (!frame || !hitTestSource || !refSpace){ reticle.setAttribute('visible',false); placeBt.disabled=true; return; }
-    const results = frame.getHitTestResults(hitTestSource);
-    if (results.length>0){
-      const pose=results[0].getPose(refSpace);
-      const p=pose.transform.position, q=pose.transform.orientation;
-      reticle.object3D.position.set(p.x,p.y,p.z);
-      reticle.object3D.quaternion.set(q.x,q.y,q.z,q.w);
-      reticle.setAttribute('visible',true);
-      placeBt.disabled=false;
-    }else{
-      reticle.setAttribute('visible',false);
-      placeBt.disabled=true;
-    }
-  });
-});
-
-placeBt.onclick = ()=>{
-  if (!reticle.getAttribute('visible')) return;
-  const THREE = AFRAME.THREE;
-  model.object3D.position.copy(reticle.object3D.position);
-  model.object3D.quaternion.copy(reticle.object3D.quaternion);
-  model.object3D.position.add(new THREE.Vector3(delta.position.x||0, delta.position.y||0, delta.position.z||0));
-  model.object3D.rotation.set(
-    THREE.MathUtils.degToRad(delta.rotation.x||0),
-    THREE.MathUtils.degToRad(delta.rotation.y||0),
-    THREE.MathUtils.degToRad(delta.rotation.z||0)
-  );
-  model.object3D.scale.set(delta.scale.x||1, delta.scale.y||1, delta.scale.z||1);
-  model.setAttribute('visible',true);
-  reticle.setAttribute('visible',false);
-  placeBt.disabled=true;
-  hud.textContent="Objet placé. Déplace-toi autour : il reste en place.";
-};
-</script>
+    scene.addEventListener('renderstart', ()=>{
+      scene.renderer.setAnimationLoop((t,frame)=>{
+        if (!frame || !hitTestSource || !refSpace) return;
+        const results=frame.getHitTestResults(hitTestSource);
+        if (results.length>0){
+          const pose=results[0].getPose(refSpace);
+          reticle.object3D.position.set(pose.transform.position.x,
+                                        pose.transform.position.y,
+                                        pose.transform.position.z);
+          reticle.object3D.quaternion.set(pose.transform.orientation.x,
+                                          pose.transform.orientation.y,
+                                          pose.transform.orientation.z,
+                                          pose.transform.orientation.w);
+          reticle.setAttribute('visible',true);
+          box.setAttribute('visible',true);
+          box.object3D.position.copy(reticle.object3D.position);
+          hud.textContent="Surface trouvée ✔";
+        }
+      });
+    });
+  </script>
 </body>
 </html>
