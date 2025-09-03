@@ -76,6 +76,7 @@
         console.error(e);
         hud.textContent = "Hit-test indisponible. Mets à jour Chrome Android.";
       }
+      console.log("enter-vr déclenché, XR session = ", scene.renderer.xr.getSession());
     });
 
     // Met à jour le réticule à chaque frame XR
@@ -248,3 +249,4 @@
   </script>
 </body>
 </html>
+
