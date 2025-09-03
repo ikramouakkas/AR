@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>AR ESGT — MindAR + Verrouillage</title>
+  <title>AR ESGT — MindAR + Verrouillage (stable)</title>
 
-  <!-- Charger A-Frame AVANT MindAR -->
-  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <!-- Version A-Frame stable avec MindAR -->
+  <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+  <!-- Adaptateur MindAR -->
   <script src="https://unpkg.com/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
@@ -18,26 +19,161 @@
     .ui {
       position: fixed; left: 0; right: 0; bottom: 14px; display: flex; gap: 10px; justify-content: center; z-index: 10;
     }
-    .ui button {
-      padding: 10px 14px; border: none; border-radius: 10px; font-size: 15px; color: #fff;
-    }
-    #lockBtn   { background: #16a34a; }
-    #unlockBtn { background: #334155; }
-    #anchorBtn { background: #2563eb; }
+    .ui button { padding: 10px 14px; border: none; border-radius: 10px; font-size: 15px; color: #fff; }
+    #lockBtn{background:#16a34a} #unlockBtn{background:#334155} #anchorBtn{background:#2563eb}
   </style>
 </head>
 <body>
   <div id="status">Scan de la cible…</div>
 
-  <!-- Scène A-Frame + MindAR (image-target) -->
   <a-scene
     mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: true">
 
-    <!-- Préchargement du modèle -->
     <a-assets timeout="45000">
       <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
     </a-assets>
 
-    <a-camera look-controls="enabled: t
+    <a-camera look-controls="enabled: true"></a-camera>
+
+    <a-entity id="markerRoot" mindar-image-target="targetIndex: 0">
+      <a-entity id="tacheo"
+                gltf-model="#tacheoModel"
+                position="0 0 -0.5"
+                rotation="0 0 0"
+                scale="0.3 0.3 0.3">
+      </a-entity>
+    </a-entity>
+
+    <a-entity id="worldAnchor" position="0 0 0"></a-entity>
+  </a-scene>
+
+  <div class="ui">
+    <button id="lockBtn"   disabled>Verrouiller</button>
+    <button id="unlockBtn" disabled>Déverrouiller</button>
+    <button id="anchorBtn">Ancrer au monde (Android)</button>
+  </div>
+
+  <script>
+    const sceneEl     = document.querySelector('a-scene');
+    const marker      = document.getElementById('markerRoot');
+    const tacheo      = document.getElementById('tacheo');
+    const worldAnchor = document.getElementById('worldAnchor');
+    const statusEl    = document.getElementById('status');
+    const lockBtn     = document.getElementById('lockBtn');
+    const unlockBtn   = document.getElementById('unlockBtn');
+    const anchorBtn   = document.getElementById('anchorBtn');
+
+    let THREEjs   = null;
+    let foundOnce = false;
+    let locked    = false;
+    let worldCopy = null;
+    let modelReady = false;
+
+    const setStatus = m => { if (statusEl) statusEl.textContent = m; };
+
+    // ⚠️ N'attache RIEN tant que la scène n'est pas prête
+    sceneEl.addEventListener('loaded', () => {
+      THREEjs = AFRAME.THREE;
+
+      // Attendre que le modèle soit réellement chargé
+      tacheo.addEventListener('model-loaded', () => {
+        modelReady = true;
+        console.log('GLB prêt');
+      });
+
+      // Événements MindAR (maintenant que tout existe)
+      marker.addEventListener('targetFound', () => {
+        foundOnce = true;
+        setStatus(locked ? 'Cible détectée (objet verrouillé).' : 'Cible détectée — tu peux verrouiller.');
+        lockBtn.disabled   = locked;
+        unlockBtn.disabled = !locked;
+        if (!locked) tacheo.setAttribute('visible', true);
+      });
+
+      marker.addEventListener('targetLost', () => {
+        setStatus(locked ? 'Cible perdue (objet verrouillé reste visible).' : 'Cible perdue — vise la cible.');
+        lockBtn.disabled   = true;
+        unlockBtn.disabled = !locked;
+      });
+
+      // Verrouiller (dupliquer le modèle à la pose monde)
+      lockBtn.addEventListener('click', () => {
+        if (!foundOnce || locked || !modelReady) return;
+        try {
+          const pos  = new THREEjs.Vector3();
+          const quat = new THREEjs.Quaternion();
+          const scl  = new THREEjs.Vector3();
+          tacheo.object3D.getWorldPosition(pos);
+          tacheo.object3D.getWorldQuaternion(quat);
+          tacheo.object3D.getWorldScale(scl);
+
+          if (worldCopy && worldCopy.parentNode) {
+            worldAnchor.removeChild(worldCopy);
+            worldCopy = null;
+          }
+
+          worldCopy = document.createElement('a-entity');
+          worldCopy.setAttribute('gltf-model', tacheo.getAttribute('gltf-model'));
+
+          const euler = new THREEjs.Euler().setFromQuaternion(quat, 'YXZ');
+          worldCopy.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
+          worldCopy.setAttribute('rotation', `${THREEjs.MathUtils.radToDeg(euler.x)} ${THREEjs.MathUtils.radToDeg(euler.y)} ${THREEjs.MathUtils.radToDeg(euler.z)}`);
+          worldCopy.setAttribute('scale', `${scl.x} ${scl.y} ${scl.z}`);
+
+          worldAnchor.appendChild(worldCopy);
+
+          tacheo.setAttribute('visible', false);
+
+          locked = true;
+          lockBtn.disabled   = true;
+          unlockBtn.disabled = false;
+          setStatus('Objet verrouillé ✔ (copie affichée, indépendante de la cible)');
+        } catch (e) {
+          console.error('Lock error:', e);
+          setStatus('Erreur verrouillage (console).');
+        }
+      });
+
+      // Déverrouiller
+      unlockBtn.addEventListener('click', () => {
+        if (!locked) return;
+        try {
+          if (worldCopy && worldCopy.parentNode) {
+            worldAnchor.removeChild(worldCopy);
+          }
+          worldCopy = null;
+
+          tacheo.setAttribute('visible', true);
+          tacheo.setAttribute('position', '0 0 -0.5');
+          tacheo.setAttribute('rotation', '0 0 0');
+
+          locked = false;
+          lockBtn.disabled   = !foundOnce;
+          unlockBtn.disabled = true;
+          setStatus('Déverrouillé — vise la cible pour reprendre.');
+        } catch (e) {
+          console.error('Unlock error:', e);
+          setStatus('Erreur déverrouillage (console).');
+        }
+      });
+
+      // ▶Android: exporter l'offset Δ et ouvrir la page WebXR
+      anchorBtn.addEventListener('click', () => {
+        try {
+          const dpos = tacheo.getAttribute('position');
+          const drot = tacheo.getAttribute('rotation');
+          const dscl = tacheo.getAttribute('scale');
+          sessionStorage.setItem('DELTA_JSON', JSON.stringify({position:dpos, rotation:drot, scale:dscl}));
+          sessionStorage.setItem('MODEL_URL', tacheo.getAttribute('gltf-model'));
+          window.location.href = 'android-image-anchor.html';
+        } catch (e) {
+          console.error(e);
+          alert("Impossible d'initialiser l'ancrage monde.");
+        }
+      });
+    });
+  </script>
+</body>
+</html>
