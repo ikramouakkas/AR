@@ -2,135 +2,132 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <!-- Règle la mise à l’échelle sur mobile et autorise l’AR plein écran -->
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>AR ESGT — MindAR + Verrouillage</title>
-
-  <!-- A-Frame (moteur 3D WebGL) : À charger AVANT MindAR -->
+  <title>AR Image Anchor (Android)</title>
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-  <!-- Adaptateur MindAR pour A-Frame (suivi "image-target") -->
-  <script src="https://unpkg.com/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
-
   <style>
-    /* Mise en page simple */
-    body { margin: 0; overflow: hidden; background: #000; font-family: system-ui, Arial, sans-serif; }
-    #status {
-      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-      background: rgba(0,0,0,.55); color: #fff; padding: 6px 10px; border-radius: 8px; font-size: 13px; z-index: 10;
-    }
-    .ui {
-      position: fixed; left: 0; right: 0; bottom: 14px; display: flex; gap: 10px; justify-content: center; z-index: 10;
-    }
-    .ui button {
-      padding: 10px 14px; border: none; border-radius: 10px; font-size: 15px; color: #fff;
-    }
-    #lockBtn   { background: #16a34a; }
-    #unlockBtn { background: #334155; }
+    body{margin:0;overflow:hidden;background:#000;font-family:system-ui,Arial,sans-serif}
+    #hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);color:#fff;background:rgba(0,0,0,.55);padding:6px 10px;border-radius:8px;font-size:13px;z-index:10}
   </style>
 </head>
 <body>
-  <!-- Petit bandeau d’état -->
-  <div id="status">Scan de la cible…</div>
+  <div id="hud">Vise le logo ESGT imprimé…</div>
 
-  <!--
-    mindar-image pour activer MindAR en mode image-target (fichier .mind).
-    autoStart: true → démarre la webcam dès que possible (Il faut autoriser la caméra).
-    device-orientation-permission-ui: demande d’accès sur iOS.
-  -->
   <a-scene
-    mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
     vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: true">
+    webxr="mode: ar; requiredFeatures: image-tracking,anchors; optionalFeatures: hit-test; overlayElement: body; sessionMode: immersive-ar">
 
-    <!--
-      <a-assets> : précharge le modèle .glb.
-    -->
+    <!-- On précharge le glb -->
     <a-assets timeout="45000">
-      <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
+      <a-asset-item id="model" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
     </a-assets>
 
-    <!-- -->
-    <a-camera look-controls="enabled: true"></a-camera>
+    <!-- Un “pivot” qu’on attachera à l’ancre (origine = centre de l’image) -->
+    <a-entity id="targetPivot" visible="false"></a-entity>
 
-    <!--
-      <a-entity mindar-image-target> : racine liée à la cible (index 0 dans target.mind).
-      Tout ce qui est enfant “colle” à la pose de l’image réelle détectée.
-    -->
-    <a-entity id="markerRoot" mindar-image-target="targetIndex: 0">
-      <!--
-        Modèle 3D ancré SUR la cible, avec un offset presquee 50cm devant le centre de la cible
-      -->
-      <a-entity id="tacheo"
-                gltf-model="#tacheoModel"
-                position="0 0 -0.5"
-                rotation="0 0 0"
-                scale="0.3 0.3 0.3">
-      </a-entity>
+    <!-- Ton objet rendu avec un OFFSET par rapport à l’origine cible -->
+    <!-- Ici, exemple: 30 cm à droite (X), 0 cm en Y, 40 cm “devant” (Z négatif dans A-Frame) -->
+    <a-entity id="objet"
+              gltf-model="#model"
+              position="0.30 0 -0.40"
+              rotation="0 0 0"
+              scale="0.3 0.3 0.3"
+              visible="false">
     </a-entity>
 
-    <!--
-      Résolution du problème :    
-      worldAnchor : noeud “libre” dans la scène (non lié à la cible).
-      On y crée une copie du modèle quand on “verrouille”,
-      pour éviter les soucis de re-parenting et garder l’objet visible
-      même si la cible sort du cadre.
-    -->
-    <a-entity id="worldAnchor" position="0 0 0"></a-entity>
+    <a-camera look-controls="enabled:true"></a-camera>
   </a-scene>
 
-  <!-- UI : boutons Verrouiller/Déverrouiller 
-  Verrouiller lit la pose du modèle sa position, rotatio, et échelle
-  pour créer une copie, au mm endroit sous worldAnchor
-  Déverrouiller supprime cette copie et ré-affiche l'original -->
-<div class="ui">
-  <button id="lockBtn"   disabled>Verrouiller</button>
-  <button id="unlockBtn" disabled>Déverrouiller</button>
-  <button id="worldBtn">Ancrer au monde (Android)</button>
-</div>
-
-
   <script>
-  const worldBtn = document.getElementById('worldBtn');
+    const scene   = document.querySelector('a-scene');
+    const hud     = document.getElementById('hud');
+    const pivot   = document.getElementById('targetPivot');
+    const objet   = document.getElementById('objet');
 
-  function getWorldPoseOfActiveModel() {
-    // 1) Si tu utilises la "copie" lors du verrouillage
-    const copy = document.querySelector('#worldAnchor > a-entity');
-    const active = (copy && copy.getAttribute('visible') !== false) ? copy : tacheo;
+    // Taille physique de l’image imprimée (en mètres)
+    const IMAGE_WIDTH_M = 0.12; // 12 cm de large, adapte à ton impression
 
-    const THREEjs = AFRAME.THREE;
-    const pos  = new THREEjs.Vector3();
-    const quat = new THREEjs.Quaternion();
-    const scl  = new THREEjs.Vector3();
-
-    active.object3D.getWorldPosition(pos);
-    active.object3D.getWorldQuaternion(quat);
-    active.object3D.getWorldScale(scl);
-
-    const euler = new THREEjs.Euler().setFromQuaternion(quat, 'YXZ');
-    return {
-      position: {x: pos.x, y: pos.y, z: pos.z},
-      rotation: {
-        x: THREEjs.MathUtils.radToDeg(euler.x),
-        y: THREEjs.MathUtils.radToDeg(euler.y),
-        z: THREEjs.MathUtils.radToDeg(euler.z)
-      },
-      scale: {x: scl.x, y: scl.y, z: scl.z}
-    };
-  }
-
-  worldBtn.addEventListener('click', () => {
-    try {
-      const pose = getWorldPoseOfActiveModel();
-      // Sauvegarde la pose et le chemin du modèle pour la page Android
-      sessionStorage.setItem('AR_MODEL_URL', tacheo.getAttribute('gltf-model')); // ex: "#tacheoModel" → on résout plus tard
-      sessionStorage.setItem('AR_POSE_JSON', JSON.stringify(pose));
-      // Ouvre la page d’ancrage monde (Android / Chrome)
-      window.location.href = 'android-ar.html';
-    } catch (e) {
-      console.error(e);
-      alert("Impossible d'initialiser l'ancrage monde. Assure-toi que l'objet est visible.");
+    // Charge l’image ESGT pour l’API image-tracking
+    async function loadTrackedImageBitmap(url){
+      const res = await fetch(url);
+      const blob = await res.blob();
+      return await createImageBitmap(blob);
     }
-  });
-</script>
+
+    scene.addEventListener('enter-vr', async () => {
+      // Assure-toi qu’on est bien en session AR
+      const session = scene.renderer.xr.getSession();
+      if (!session) { hud.textContent = "Pas de session ARWebXR."; return; }
+
+      // Prépare l’image à suivre
+      const imgBitmap = await loadTrackedImageBitmap('./esgt-target.png');
+
+      // Ajoute l’image aux “trackedImages” de la session (Chrome Android)
+      try{
+        await session.updateTargetImage(imgBitmap, IMAGE_WIDTH_M);
+        // Certains builds utilisent plutôt requestSession avec trackedImages directement ;
+        // A-Frame gère la session pour nous, donc on passe par updateTargetImage().
+      }catch(e){
+        console.warn('updateTargetImage non supporté, on tente l’ancienne voie', e);
+      }
+
+      // Espace de référence
+      const refSpace = await session.requestReferenceSpace('local');
+
+      // Écoute les “tracked images” à chaque frame
+      scene.renderer.setAnimationLoop((t, frame) => {
+        if (!frame) return;
+        const results = frame.getImageTrackingResults ? frame.getImageTrackingResults() : [];
+
+        for (const result of results) {
+          // Chaque result correspond à UNE image suivie (ici on n’en a qu’une)
+          const state = result.trackingState; // "tracked" | "emulated" | "not-tracked"
+          const pose  = frame.getPose(result.imageSpace || result, refSpace);
+          if (!pose) continue;
+
+          // Positionne le pivot à la pose du CENTRE DE L’IMAGE (origine du repère)
+          pivot.object3D.position.set(
+            pose.transform.position.x,
+            pose.transform.position.y,
+            pose.transform.position.z
+          );
+          pivot.object3D.quaternion.set(
+            pose.transform.orientation.x,
+            pose.transform.orientation.y,
+            pose.transform.orientation.z,
+            pose.transform.orientation.w
+          );
+
+          // Crée/attache une ANCRE AR à cette pose (pour la stabilité hors-champ)
+          if (!pivot.anchor) {
+            session.requestAnchor
+              ? session.requestAnchor(pose.transform, refSpace).then(anchor => {
+                  pivot.anchor = anchor;
+                  // Suivre automatiquement les updates de l’ancre
+                  const anchorSet = frame.trackedAnchors || session.trackedAnchors;
+                  if (anchorSet && anchorSet.has && anchorSet.size !== undefined) {
+                    // boucle d’update : A-Frame relira la pose via pivot.object3D (ci-dessous)
+                  }
+                })
+              : console.warn('Anchors non supportés sur cette version.');
+          }
+
+          // Affiche pivot + objet (l’objet a un OFFSET relatif au pivot dans le HTML)
+          if (!pivot.getAttribute('visible'))  pivot.setAttribute('visible', true);
+          if (!objet.getAttribute('visible'))  objet.setAttribute('visible', true);
+
+          // IMPORTANT : on garde l’objet comme ENFANT LOGIQUE du pivot (repère cible)
+          // → en A-Frame, on peut simplement forcer le parentage côté object3D:
+          if (objet.object3D.parent !== pivot.object3D) {
+            pivot.object3D.add(objet.object3D);
+          }
+
+          hud.textContent = (state === 'tracked')
+            ? 'Image ESGT suivie (ancre posée). Déplace-toi : l’objet reste sur la table.'
+            : 'Tracking approximatif… bouge doucement et garde une bonne lumière.';
+        }
+      });
+    });
+  </script>
 </body>
 </html>
