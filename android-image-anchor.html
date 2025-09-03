@@ -1,158 +1,41 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>AR Monde (Android)</title>
-
-  <!-- ✅ Un SEUL import A-Frame, dans le HEAD -->
-  <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-
-  <style>
-    body{margin:0;overflow:hidden;background:#000;font-family:system-ui,Arial,sans-serif}
-    #hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);color:#fff;background:rgba(0,0,0,.55);padding:6px 10px;border-radius:8px;font-size:13px;z-index:10}
-    .ui{position:fixed;left:0;right:0;bottom:14px;display:flex;gap:10px;justify-content:center;z-index:10}
-    .ui button{padding:10px 14px;border:none;border-radius:10px;font-size:15px;color:#fff}
-    #start{background:#2563eb} #place{background:#16a34a} #back{background:#334155}
-  </style>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Diag AR</title>
+<script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+<style>
+  body{margin:0;font-family:system-ui,Arial}
+  #log{position:fixed;inset:0;padding:12px;white-space:pre-wrap;overflow:auto}
+  .ui{position:fixed;left:0;right:0;bottom:12px;display:flex;gap:8px;justify-content:center}
+  .ui button{padding:10px 14px;border:none;border-radius:10px;color:#fff}
+  #start{background:#2563eb}
+</style>
 </head>
 <body>
-  <div id="hud">1) Démarrer AR • 2) Balaye la table → anneau • 3) Ancrer ici.</div>
-  <div class="ui">
-    <button id="start">Démarrer AR</button>
-    <button id="place" disabled>Ancrer ici</button>
-    <button id="back">Retour</button>
-  </div>
+<div id="log">Vérification du support AR…</div>
+<div class="ui"><button id="start">Démarrer AR</button></div>
 
-  <!-- ✅ webxr propre : pas de props invalides -->
-  <a-scene
-    vr-mode-ui="enabled: false"
-    webxr="requiredFeatures: hit-test,local; optionalFeatures: dom-overlay; overlayElement: body">
+<a-scene id="scene" vr-mode-ui="enabled:false" webxr="requiredFeatures: local">
+  <a-camera look-controls="enabled:true"></a-camera>
+</a-scene>
 
-    <!-- Réticule (posé par le hit-test) -->
-    <a-entity id="reticle" visible="false"
-              geometry="primitive: ring; radiusInner: 0.03; radiusOuter: 0.05"
-              material="shader: flat"
-              rotation="-90 0 0"></a-entity>
+<script>
+(async () => {
+  const log = (m)=>document.getElementById('log').textContent += '\n' + m;
+  const ok = !!navigator.xr;
+  log('navigator.xr: ' + ok);
+  if (!ok){ log('➡️ WebXR indisponible (met à jour Chrome).'); return; }
+  const sup = await navigator.xr.isSessionSupported('immersive-ar');
+  log('immersive-ar support ? ' + sup);
+  if (!sup){ log('➡️ AR non dispo : mets à jour "Google Play Services for AR" + redémarre.'); }
 
-    <!-- Modèle (par défaut modele.glb ; peut être remplacé via sessionStorage) -->
-    <a-assets timeout="45000">
-      <a-asset-item id="assetModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
-    </a-assets>
-    <a-entity id="tacheo" visible="false" gltf-model="#assetModel"></a-entity>
-
-    <a-camera look-controls="enabled: true"></a-camera>
-  </a-scene>
-
-  <!-- ✅ Un SEUL script, en bas -->
-  <script>
-    // UI
-    const hud     = document.getElementById('hud');
-    const startBt = document.getElementById('start');
-    const placeBt = document.getElementById('place');
-    const backBt  = document.getElementById('back');
-
-    // Scène / entités
-    const sceneEl = document.querySelector('a-scene');
-    const reticle = document.getElementById('reticle');
-    const model   = document.getElementById('tacheo');
-
-    // Données envoyées depuis index.html (offset Δ + modèle)
-    const delta    = JSON.parse(sessionStorage.getItem('DELTA_JSON') || '{"position":{"x":0,"y":0,"z":-0.5},"rotation":{"x":0,"y":0,"z":0},"scale":{"x":0.3,"y":0.3,"z":0.3}}');
-    const modelURL = sessionStorage.getItem('MODEL_URL');
-    if (modelURL && modelURL !== '#tacheoModel') model.setAttribute('gltf-model', modelURL);
-
-    // Boutons
-    startBt.addEventListener('click', () => {
-      // ⚠️ Démarrage AR doit être déclenché par un geste utilisateur
-      sceneEl.enterVR();
-    });
-    backBt.addEventListener('click', () => history.back());
-
-    // WebXR state
-    let xrSession = null, hitTestSource = null, viewerSpace = null, refSpace = null;
-
-    // Quand la session AR démarre
-    sceneEl.addEventListener('enter-vr', async () => {
-      try {
-        // Sanity: est-ce qu'AR est supporté ?
-        if (navigator.xr) {
-          const supported = await navigator.xr.isSessionSupported('immersive-ar');
-          console.log('immersive-ar support ?', supported);
-        }
-
-        if (!sceneEl.renderer.xr.isPresenting) {
-          hud.textContent = "AR non disponible (Chrome Android requis).";
-          return;
-        }
-
-        const xr = sceneEl.renderer.xr;
-        xrSession   = xr.getSession();
-        viewerSpace = await xrSession.requestReferenceSpace('viewer');
-        refSpace    = await xrSession.requestReferenceSpace('local');
-        hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
-
-        hud.textContent = "Balaye la table jusqu’à voir l’anneau, puis 'Ancrer ici'.";
-      } catch (e) {
-        console.error(e);
-        hud.textContent = "Hit-test indisponible. Mets à jour Chrome Android.";
-      }
-    });
-
-    // Mettre à jour le réticule à chaque frame XR
-    sceneEl.addEventListener('renderstart', () => {
-      sceneEl.renderer.setAnimationLoop((t, frame) => {
-        if (!frame || !hitTestSource || !refSpace) {
-          reticle.setAttribute('visible', false);
-          placeBt.disabled = true;
-          return;
-        }
-        const results = frame.getHitTestResults(hitTestSource);
-        if (results.length > 0) {
-          const pose = results[0].getPose(refSpace);
-          const p = pose.transform.position, q = pose.transform.orientation;
-          reticle.object3D.position.set(p.x, p.y, p.z);
-          reticle.object3D.quaternion.set(q.x, q.y, q.z, q.w);
-          reticle.setAttribute('visible', true);
-          placeBt.disabled = false;
-        } else {
-          reticle.setAttribute('visible', false);
-          placeBt.disabled = true;
-        }
-      });
-    });
-
-    // Ancrer ici = placer le modèle à la pose du réticule + appliquer l'offset Δ
-    placeBt.addEventListener('click', () => {
-      if (!reticle.getAttribute('visible')) return;
-
-      const THREE = AFRAME.THREE;
-      // poser le modèle au réticule
-      model.object3D.position.copy(reticle.object3D.position);
-      model.object3D.quaternion.copy(reticle.object3D.quaternion);
-
-      // appliquer Δ (offset par rapport à l'origine choisie)
-      model.object3D.position.add(new THREE.Vector3(
-        delta.position.x || 0,
-        delta.position.y || 0,
-        delta.position.z || 0
-      ));
-      model.object3D.rotation.set(
-        THREE.MathUtils.degToRad(delta.rotation.x || 0),
-        THREE.MathUtils.degToRad(delta.rotation.y || 0),
-        THREE.MathUtils.degToRad(delta.rotation.z || 0)
-      );
-      model.object3D.scale.set(
-        delta.scale.x || 1,
-        delta.scale.y || 1,
-        delta.scale.z || 1
-      );
-
-      model.setAttribute('visible', true);
-      reticle.setAttribute('visible', false);
-      placeBt.disabled = true;
-      hud.textContent = "Objet placé. Déplace-toi autour : il reste en place.";
-    });
-  </script>
+  document.getElementById('start').onclick = ()=> {
+    document.getElementById('scene').enterVR();
+    log('➡️ Tentative de démarrage AR (enterVR)…');
+  };
+})();
+</script>
 </body>
 </html>
