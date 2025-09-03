@@ -2,169 +2,200 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
+  <!-- Règle la mise à l’échelle sur mobile et autorise l’AR plein écran -->
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Tachéo AR — lock sans couper la caméra</title>
+  <title>AR ESGT — MindAR + Verrouillage</title>
 
-  <!-- A-Frame puis MindAR (versions stables) -->
+  <!-- A-Frame (moteur 3D WebGL) : À charger AVANT MindAR -->
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <!-- Adaptateur MindAR pour A-Frame (suivi "image-target") -->
   <script src="https://unpkg.com/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
-    body{ margin:0; overflow:hidden; background:#000; font-family:system-ui,Arial,sans-serif; }
-    #status{
-      position:fixed; top:10px; left:50%; transform:translateX(-50%);
-      background:rgba(0,0,0,.55); color:#fff; padding:6px 10px; border-radius:8px; font-size:13px; z-index:10;
+    /* Mise en page simple */
+    body { margin: 0; overflow: hidden; background: #000; font-family: system-ui, Arial, sans-serif; }
+    #status {
+      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,.55); color: #fff; padding: 6px 10px; border-radius: 8px; font-size: 13px; z-index: 10;
     }
-    .ui{ position:fixed; left:0; right:0; bottom:14px; display:flex; gap:10px; justify-content:center; z-index:10; }
-    .ui button{ padding:10px 14px; border:none; border-radius:10px; font-size:15px; color:#fff; }
-    #lockBtn{ background:#16a34a } #unlockBtn{ background:#334155 }
-
-    /* Option: toujours masquer l’overlay de scan MindAR */
-    .mindar-ui-scanning{ display:none !important; }
-
-    /* …ou seulement après verrouillage :
-    body.locked .mindar-ui-scanning{ display:none !important; }
-    */
+    .ui {
+      position: fixed; left: 0; right: 0; bottom: 14px; display: flex; gap: 10px; justify-content: center; z-index: 10;
+    }
+    .ui button {
+      padding: 10px 14px; border: none; border-radius: 10px; font-size: 15px; color: #fff;
+    }
+    #lockBtn   { background: #16a34a; }
+    #unlockBtn { background: #334155; }
   </style>
 </head>
 <body>
+  <!-- Petit bandeau d’état -->
   <div id="status">Scan de la cible…</div>
 
+  <!--
+    mindar-image pour activer MindAR en mode image-target (fichier .mind).
+    autoStart: true → démarre la webcam dès que possible (Il faut autoriser la caméra).
+    device-orientation-permission-ui: demande d’accès sur iOS.
+  -->
   <a-scene
-    mindar-image="imageTargetSrc: ./target.mind; autoStart: true; uiScanning: true;"
+    mindar-image="imageTargetSrc: ./target.mind; autoStart: true;"
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: true">
 
+    <!--
+      <a-assets> : précharge le modèle .glb.
+    -->
     <a-assets timeout="45000">
       <a-asset-item id="tacheoModel" src="./modele.glb" crossorigin="anonymous"></a-asset-item>
     </a-assets>
 
+    <!-- -->
     <a-camera look-controls="enabled: true"></a-camera>
 
+    <!--
+      <a-entity mindar-image-target> : racine liée à la cible (index 0 dans target.mind).
+      Tout ce qui est enfant “colle” à la pose de l’image réelle détectée.
+    -->
     <a-entity id="markerRoot" mindar-image-target="targetIndex: 0">
+      <!--
+        Modèle 3D ancré SUR la cible, avec un offset presquee 50cm devant le centre de la cible
+      -->
       <a-entity id="tacheo"
-        gltf-model="#tacheoModel"
-        position="0 0 -0.5"
-        rotation="0 0 0"
-        scale="0.3 0.3 0.3">
+                gltf-model="#tacheoModel"
+                position="0 0 -0.5"
+                rotation="0 0 0"
+                scale="0.3 0.3 0.3">
       </a-entity>
     </a-entity>
-    <!-- Ancre monde indépendante -->
+
+    <!--
+      Résolution du problème :    
+      worldAnchor : noeud “libre” dans la scène (non lié à la cible).
+      On y crée une copie du modèle quand on “verrouille”,
+      pour éviter les soucis de re-parenting et garder l’objet visible
+      même si la cible sort du cadre.
+    -->
     <a-entity id="worldAnchor" position="0 0 0"></a-entity>
   </a-scene>
+
+  <!-- UI : boutons Verrouiller/Déverrouiller 
+  Verrouiller lit la pose du modèle sa position, rotatio, et échelle
+  pour créer une copie, au mm endroit sous worldAnchor
+  Déverrouiller supprime cette copie et ré-affiche l'original -->
   <div class="ui">
-    <button id="lockBtn" disabled>Verrouiller</button>
+    <button id="lockBtn"   disabled>Verrouiller</button>
     <button id="unlockBtn" disabled>Déverrouiller</button>
   </div>
 
   <script>
-  const sceneEl    = document.querySelector('a-scene');
-  const marker     = document.getElementById('markerRoot');
-  const tacheo     = document.getElementById('tacheo');
-  const worldAnchor= document.getElementById('worldAnchor');
+    // Raccourcis DOM
+    const sceneEl     = document.querySelector('a-scene');
+    const marker      = document.getElementById('markerRoot');
+    const tacheo      = document.getElementById('tacheo');
+    const worldAnchor = document.getElementById('worldAnchor');
+    const statusEl    = document.getElementById('status');
+    const lockBtn     = document.getElementById('lockBtn');
+    const unlockBtn   = document.getElementById('unlockBtn');
 
-  const statusEl   = document.getElementById('status');
-  const lockBtn    = document.getElementById('lockBtn');
-  const unlockBtn  = document.getElementById('unlockBtn');
+    // Espace “monde” : on créera une COPIE ici au verrouillage
+    let worldCopy = null;
+    let foundOnce = false;
+    let locked    = false;
+    let THREEjs   = null;
 
-  let THREEjs = null;
-  let foundOnce = false;
-  let locked = false;
-  let worldCopy = null; // la copie affichée quand verrouillé
+    const setStatus = (m)=> { if (statusEl) statusEl.textContent = m; };
 
-  const setStatus = (m)=> statusEl && (statusEl.textContent = m);
+    // Quand la scène A-Frame est prête : récupère THREE via AFRAME
+    sceneEl.addEventListener('loaded', () => {
+      THREEjs = AFRAME.THREE;
+      console.log('AFRAME', AFRAME.version, 'MindAR system OK?', !!sceneEl.systems['mindar-image-system']);
+    });
 
-  sceneEl.addEventListener('loaded', () => {
-    THREEjs = AFRAME.THREE;
-    console.log('AFRAME', AFRAME.version, 'MindAR?', !!sceneEl.systems['mindar-image-system']);
-  });
+    // MindAR → cible détectée
+    marker.addEventListener('targetFound', () => {
+      foundOnce = true;
+      setStatus(locked ? 'Cible détectée (objet verrouillé).' : 'Cible détectée — tu peux verrouiller.');
+      lockBtn.disabled   = locked;
+      unlockBtn.disabled = !locked;
+      if (!locked) tacheo.setAttribute('visible', true);
+    });
 
-  // Événements MindAR
-  marker.addEventListener('targetFound', () => {
-    foundOnce = true;
-    setStatus(locked ? 'Cible trouvée (objet verrouillé).' : 'Cible trouvée — tu peux verrouiller.');
-    lockBtn.disabled   = locked;
-    unlockBtn.disabled = !locked;
-    // s'assurer que l'original est visible quand non verrouillé
-    if (!locked) tacheo.setAttribute('visible', true);
-  });
-
-  marker.addEventListener('targetLost', () => {
-    setStatus(locked ? 'Cible perdue (objet verrouillé reste affiché).' : 'Cible perdue — vise la cible.');
-    lockBtn.disabled   = true;
-    unlockBtn.disabled = !locked;
-  });
-
-  // 🔒 Verrouiller : créer une COPIE au même endroit dans worldAnchor, cacher l’original
-  lockBtn.addEventListener('click', () => {
-    if (!foundOnce || locked) return;
-
-    try {
-      // lire la pose monde de l’original
-      const pos  = new THREEjs.Vector3();
-      const quat = new THREEjs.Quaternion();
-      const scl  = new THREEjs.Vector3();
-      tacheo.object3D.getWorldPosition(pos);
-      tacheo.object3D.getWorldQuaternion(quat);
-      tacheo.object3D.getWorldScale(scl);
-
-      // si une copie existe déjà, on la supprime
-      if (worldCopy && worldCopy.parentNode) {
-        worldAnchor.removeChild(worldCopy);
-        worldCopy = null;
-      }
-
-      // créer une nouvelle entité identique au modèle
-      worldCopy = document.createElement('a-entity');
-      worldCopy.setAttribute('gltf-model', tacheo.getAttribute('gltf-model')); // même source (#tacheoModel)
-      // appliquer la pose monde (convertir la rotation en degrés)
-      const euler = new THREEjs.Euler().setFromQuaternion(quat, 'YXZ');
-      worldCopy.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
-      worldCopy.setAttribute('rotation', `${THREEjs.MathUtils.radToDeg(euler.x)} ${THREEjs.MathUtils.radToDeg(euler.y)} ${THREEjs.MathUtils.radToDeg(euler.z)}`);
-      worldCopy.setAttribute('scale', `${scl.x} ${scl.y} ${scl.z}`);
-
-      worldAnchor.appendChild(worldCopy);
-
-      // cacher l’original lié au marker (on ne le déplace plus)
-      tacheo.setAttribute('visible', false);
-
-      locked = true;
+    // MindAR → cible perdue
+    marker.addEventListener('targetLost', () => {
+      setStatus(locked ? 'Cible perdue (objet verrouillé reste visible).' : 'Cible perdue — vise la cible.');
       lockBtn.disabled   = true;
-      unlockBtn.disabled = false;
-      setStatus('Objet verrouillé ✔ (copie indépendante affichée)');
-    } catch (e) {
-      console.error('Lock error:', e);
-      setStatus('Erreur verrouillage (console).');
-    }
-  });
+      unlockBtn.disabled = !locked;
+    });
 
-  // 🔓 Déverrouiller : supprimer la copie et ré-afficher l’original sous le marker
-  unlockBtn.addEventListener('click', () => {
-    if (!locked) return;
+    // Verrouiller :
+    // duplication du modèle à la POSE MONDE actuelle et l’attache à worldAnchor (indépendant du marker),
+    // puis cacher l’original (lié au marker).
+    lockBtn.addEventListener('click', () => {
+      if (!foundOnce || locked) return;
 
-    try {
-      if (worldCopy && worldCopy.parentNode) {
-        worldAnchor.removeChild(worldCopy);
+      try {
+        const pos  = new THREEjs.Vector3();
+        const quat = new THREEjs.Quaternion();
+        const scl  = new THREEjs.Vector3();
+        tacheo.object3D.getWorldPosition(pos);
+        tacheo.object3D.getWorldQuaternion(quat);
+        tacheo.object3D.getWorldScale(scl);
+
+        // Nettoie une copie précédente si existante
+        if (worldCopy && worldCopy.parentNode) {
+          worldAnchor.removeChild(worldCopy);
+          worldCopy = null;
+        }
+
+        // Crée une nouvelle entité identique
+        worldCopy = document.createElement('a-entity');
+        worldCopy.setAttribute('gltf-model', tacheo.getAttribute('gltf-model'));
+        // Applique la POSE MONDE (rotation convertie en degrés)
+        const euler = new THREEjs.Euler().setFromQuaternion(quat, 'YXZ');
+        worldCopy.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
+        worldCopy.setAttribute('rotation', `${THREEjs.MathUtils.radToDeg(euler.x)} ${THREEjs.MathUtils.radToDeg(euler.y)} ${THREEjs.MathUtils.radToDeg(euler.z)}`);
+        worldCopy.setAttribute('scale', `${scl.x} ${scl.y} ${scl.z}`);
+
+        worldAnchor.appendChild(worldCopy);
+
+        // Cache l’original (il reste sous le marker pour les prochains scans)
+        tacheo.setAttribute('visible', false);
+
+        locked = true;
+        lockBtn.disabled   = true;
+        unlockBtn.disabled = false;
+        setStatus('Objet verrouillé ✔');
+      } catch (e) {
+        console.error('Lock error:', e);
+        setStatus('Erreur verrouillage (console).');
       }
-      worldCopy = null;
+    });
 
-      // remettre l’original visible et à son offset initial
-      tacheo.setAttribute('visible', true);
-      tacheo.setAttribute('position', '0 0 -0.5');
-      tacheo.setAttribute('rotation', '0 0 0');
-      // tacheo.setAttribute('scale', '0.3 0.3 0.3'); // si tu veux forcer l’échelle initiale
+    // Déverrouiller :
+    // supprime la copie monde et ré-affiche l’original sous le marker (avec offset initial).
+    unlockBtn.addEventListener('click', () => {
+      if (!locked) return;
 
-      locked = false;
-      lockBtn.disabled   = !foundOnce;
-      unlockBtn.disabled = true;
-      setStatus('Déverrouillé — vise la cible pour reprendre.');
-    } catch (e) {
-      console.error('Unlock error:', e);
-      setStatus('Erreur déverrouillage (console).');
-    }
-  });
-</script>
+      try {
+        if (worldCopy && worldCopy.parentNode) {
+          worldAnchor.removeChild(worldCopy);
+        }
+        worldCopy = null;
+
+        tacheo.setAttribute('visible', true);
+        tacheo.setAttribute('position', '0 0 -0.5');
+        tacheo.setAttribute('rotation', '0 0 0');
+        // tacheo.setAttribute('scale', '0.3 0.3 0.3'); // si besoin
+
+        locked = false;
+        lockBtn.disabled   = !foundOnce;
+        unlockBtn.disabled = true;
+        setStatus('Déverrouillé — vise la cible pour reprendre.');
+      } catch (e) {
+        console.error('Unlock error:', e);
+        setStatus('Erreur déverrouillage (console).');
+      }
+    });
+  </script>
 </body>
 </html>
-
-
